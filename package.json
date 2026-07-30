@@ -1,0 +1,42 @@
+{
+  "name": "padsts",
+  "version": "0.0.1",
+  "description": "TypeScript-first parser and serializer for PADS PCB files",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tscircuit/padsts"
+  },
+  "scripts": {
+    "build": "tsup-node lib/index.ts --format esm --dts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit",
+    "format": "biome check --write .",
+    "format:check": "biome check .",
+    "check": "bun run format:check && bun run typecheck && bun test && bun run build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.4",
+    "@types/bun": "latest",
+    "tsup": "^8.5.0",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
