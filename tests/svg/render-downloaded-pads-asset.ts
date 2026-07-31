@@ -99,7 +99,13 @@ const visualSnapshotViews: {
   {
     name: "assembly",
     options: {
-      visibleGerberLayers: ["F_Silkscreen", "B_Silkscreen", "Edge_Cuts"],
+      visibleGerberLayers: [
+        "F_Silkscreen",
+        "B_Silkscreen",
+        "F_Fab",
+        "B_Fab",
+        "Edge_Cuts",
+      ],
     },
   },
 ]

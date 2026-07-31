@@ -15,6 +15,8 @@ const isAvailable = await isSvgTestAssetAvailable(asset)
 test.skipIf(!isAvailable)("renders the LCORE 2 ASCII board", async () => {
   const geometry = await extractDownloadedPadsAssetGeometry(asset)
   const vias = geometry.circles.filter((circle) => circle.kind === "via")
+  const decalPaths = geometry.paths.filter((path) => path.reference)
+  const decalCircles = geometry.circles.filter((circle) => circle.reference)
   const svg = await renderDownloadedPadsAsset(asset)
   expect(vias).toHaveLength(24)
   expect(vias.every((via) => via.radius === 300_000)).toBe(true)
@@ -24,6 +26,11 @@ test.skipIf(!isAvailable)("renders the LCORE 2 ASCII board", async () => {
   expect(geometry.pads).toHaveLength(69)
   expect(geometry.holes).toHaveLength(4)
   expect(geometry.holes.every((hole) => !hole.plated)).toBe(true)
+  expect(decalPaths).toHaveLength(45)
+  expect(decalCircles).toHaveLength(5)
+  expect(
+    geometry.layers.find((layer) => layer.name === "Silkscreen Top"),
+  ).toMatchObject({ role: "silkscreen", side: "top" })
   expectGerberStyleSvg(svg)
   expect(svg).toContain('data-kind="outline"')
   expect(svg).toContain('data-kind="placement"')
@@ -58,6 +65,22 @@ test.skipIf(!isAvailable)("renders the LCORE 2 ASCII board", async () => {
           width: 9_000_000,
           height: 8_000_000,
         },
+      },
+      {
+        name: "dense-component-graphics",
+        viewBox: {
+          x: -10_500_000,
+          y: -22_500_000,
+          width: 18_000_000,
+          height: 12_000_000,
+        },
+        visibleGerberLayers: [
+          "F_Silkscreen",
+          "B_Silkscreen",
+          "F_Fab",
+          "B_Fab",
+          "Edge_Cuts",
+        ],
       },
     ],
   })

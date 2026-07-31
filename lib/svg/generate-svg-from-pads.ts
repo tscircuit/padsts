@@ -80,6 +80,13 @@ const DEFAULT_GERBER_LAYER_COLORS: Record<string, string> = {
   B_Cu: "#4d7fc4",
   F_Silkscreen: "#f3f3f3",
   B_Silkscreen: "#d6d6d6",
+  F_Fab: "#d9a441",
+  B_Fab: "#b88c3b",
+  F_Mask: "#b35bb3",
+  B_Mask: "#8f478f",
+  F_Paste: "#aab7c4",
+  B_Paste: "#8493a3",
+  Drill_Drawing: "#81a1c1",
   Edge_Cuts: "#d8d8d8",
   Dwgs_User: "#8b9bb4",
   Keepout: "#d36ba6",
@@ -472,19 +479,28 @@ const shouldRenderLayer = (
 const getMetadataAttributes = ({
   kind,
   layer,
+  gerberLayer,
   name,
   netName,
+  reference,
+  decalName,
 }: {
   kind: string
   layer?: number | string
+  gerberLayer?: string
   name?: string
   netName?: string
+  reference?: string
+  decalName?: string
 }): string =>
   [
     `data-kind="${escapeXml(kind)}"`,
     layer !== undefined ? `data-pads-layer="${escapeXml(String(layer))}"` : "",
+    gerberLayer ? `data-gerber-layer-name="${escapeXml(gerberLayer)}"` : "",
     name ? `data-name="${escapeXml(name)}"` : "",
     netName ? `data-net="${escapeXml(netName)}"` : "",
+    reference ? `data-reference="${escapeXml(reference)}"` : "",
+    decalName ? `data-decal="${escapeXml(decalName)}"` : "",
   ]
     .filter(Boolean)
     .join(" ")
@@ -965,42 +981,62 @@ const renderDrills = ({ context }: { context: RenderContext }): string => {
 }
 
 const renderDrawingGeometry = (context: RenderContext): string => {
-  if (!shouldRenderLayer(context, "Dwgs_User")) return ""
-  const drawingPaths = context.geometry.paths
-    .filter((path) => path.kind === "drawing")
-    .map((path) => {
-      const pathData = getPathData(path)
-      if (!pathData) return ""
-      const strokeWidth = getRenderedStrokeWidth({
-        sourceWidth: path.width,
-        minimumFeatureSize: context.minimumFeatureSize,
-        kind: path.kind,
+  const drawingPathsByLayer = new Map<string, PadsGeometryPath[]>()
+  const drawingCirclesByLayer = new Map<string, PadsGeometryCircle[]>()
+  for (const path of context.geometry.paths) {
+    if (path.kind !== "drawing") continue
+    const layerName = path.gerberLayer ?? "Dwgs_User"
+    const layerPaths = drawingPathsByLayer.get(layerName) ?? []
+    layerPaths.push(path)
+    drawingPathsByLayer.set(layerName, layerPaths)
+  }
+  for (const circle of context.geometry.circles) {
+    if (circle.kind !== "drawing") continue
+    const layerName = circle.gerberLayer ?? "Dwgs_User"
+    const layerCircles = drawingCirclesByLayer.get(layerName) ?? []
+    layerCircles.push(circle)
+    drawingCirclesByLayer.set(layerName, layerCircles)
+  }
+
+  const layerNames = new Set([
+    ...drawingPathsByLayer.keys(),
+    ...drawingCirclesByLayer.keys(),
+  ])
+  return [...layerNames]
+    .map((layerName) => {
+      if (!shouldRenderLayer(context, layerName)) return ""
+      const drawingPaths = (drawingPathsByLayer.get(layerName) ?? [])
+        .map((path) => {
+          const pathData = getPathData(path)
+          if (!pathData) return ""
+          const strokeWidth = getRenderedStrokeWidth({
+            sourceWidth: path.width,
+            minimumFeatureSize: context.minimumFeatureSize,
+            kind: path.kind,
+          })
+          return `<path ${getMetadataAttributes(path)} d="${pathData}" fill="none" stroke="currentColor" stroke-width="${formatNumber(strokeWidth)}"/>`
+        })
+        .join("")
+      const drawingCircles = (drawingCirclesByLayer.get(layerName) ?? [])
+        .map((circle) => {
+          const radius = Math.max(
+            Math.abs(circle.radius),
+            context.minimumFeatureSize,
+          )
+          const strokeWidth = Math.max(
+            Math.abs(circle.width),
+            context.minimumFeatureSize,
+          )
+          return `<circle ${getMetadataAttributes(circle)} cx="${formatNumber(circle.center.x)}" cy="${formatNumber(circle.center.y)}" r="${formatNumber(radius)}" fill="none" stroke="currentColor" stroke-width="${formatNumber(strokeWidth)}"/>`
+        })
+        .join("")
+      const color = getLayerColor({
+        layerName,
+        layerColors: context.layerColors,
       })
-      return `<path ${getMetadataAttributes(path)} d="${pathData}" fill="none" stroke="currentColor" stroke-width="${formatNumber(strokeWidth)}"/>`
+      return `<g id="pads-${escapeXml(layerName)}-drawings" data-gerber-layer="${escapeXml(layerName)}" color="${color}" fill="currentColor" stroke="currentColor"${context.boardClipAttribute}>${drawingPaths}${drawingCircles}</g>`
     })
     .join("")
-
-  const drawingCircles = context.geometry.circles
-    .filter((circle) => circle.kind === "drawing")
-    .map((circle) => {
-      const radius = Math.max(
-        Math.abs(circle.radius),
-        context.minimumFeatureSize,
-      )
-      const strokeWidth = Math.max(
-        Math.abs(circle.width),
-        context.minimumFeatureSize,
-      )
-      return `<circle ${getMetadataAttributes(circle)} cx="${formatNumber(circle.center.x)}" cy="${formatNumber(circle.center.y)}" r="${formatNumber(radius)}" fill="none" stroke="currentColor" stroke-width="${formatNumber(strokeWidth)}"/>`
-    })
-    .join("")
-
-  if (!drawingPaths && !drawingCircles) return ""
-  const color = getLayerColor({
-    layerName: "Dwgs_User",
-    layerColors: context.layerColors,
-  })
-  return `<g id="pads-Dwgs_User" data-gerber-layer="Dwgs_User" color="${color}" fill="currentColor" stroke="currentColor"${context.boardClipAttribute}>${drawingPaths}${drawingCircles}</g>`
 }
 
 const renderKeepouts = (context: RenderContext): string => {

@@ -16,6 +16,8 @@ test.skipIf(!isAvailable)(
   "renders the unrouted TMS ASCII reference board",
   async () => {
     const geometry = await extractDownloadedPadsAssetGeometry(asset)
+    const decalPaths = geometry.paths.filter((path) => path.reference)
+    const decalCircles = geometry.circles.filter((circle) => circle.reference)
     const svg = await renderDownloadedPadsAsset(asset)
     expect(geometry.pads).toHaveLength(1_760)
     expect(geometry.holes).toHaveLength(66)
@@ -24,6 +26,11 @@ test.skipIf(!isAvailable)(
     ).toHaveLength(3)
     expect(geometry.holes.filter((hole) => hole.plated)).toHaveLength(58)
     expect(geometry.holes.filter((hole) => !hole.plated)).toHaveLength(8)
+    expect(decalPaths).toHaveLength(1_110)
+    expect(decalCircles).toHaveLength(101)
+    expect(
+      geometry.layers.find((layer) => layer.name === "Assembly Drawing Top"),
+    ).toMatchObject({ role: "assembly", side: "top" })
     expectGerberStyleSvg(svg)
     expect(svg).toContain('data-kind="outline"')
     expect(svg).toContain('data-kind="placement"')
@@ -59,6 +66,22 @@ test.skipIf(!isAvailable)(
             width: 12_000_000,
             height: 36_000_000,
           },
+        },
+        {
+          name: "jm-horizontal-component-graphics",
+          viewBox: {
+            x: 90_000_000,
+            y: 103_000_000,
+            width: 51_000_000,
+            height: 13_000_000,
+          },
+          visibleGerberLayers: [
+            "F_Silkscreen",
+            "B_Silkscreen",
+            "F_Fab",
+            "B_Fab",
+            "Edge_Cuts",
+          ],
         },
       ],
     })

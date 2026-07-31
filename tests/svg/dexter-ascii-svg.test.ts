@@ -17,6 +17,8 @@ test.skipIf(!isAvailable)(
   async () => {
     const geometry = await extractDownloadedPadsAssetGeometry(asset)
     const vias = geometry.circles.filter((circle) => circle.kind === "via")
+    const decalPaths = geometry.paths.filter((path) => path.reference)
+    const decalCircles = geometry.circles.filter((circle) => circle.reference)
     const svg = await renderDownloadedPadsAsset(asset)
     expect(vias).toHaveLength(796)
     expect(vias.every((via) => via.drillRadius !== undefined)).toBe(true)
@@ -26,6 +28,11 @@ test.skipIf(!isAvailable)(
     expect(geometry.pads).toHaveLength(918)
     expect(geometry.holes).toHaveLength(95)
     expect(geometry.holes.filter((hole) => hole.plated)).toHaveLength(90)
+    expect(decalPaths).toHaveLength(977)
+    expect(decalCircles).toHaveLength(11)
+    expect(
+      geometry.layers.find((layer) => layer.name === "Silkscreen Top"),
+    ).toMatchObject({ role: "silkscreen", side: "top" })
     expectGerberStyleSvg(svg)
     expect(svg).toContain('data-kind="outline"')
     expect(svg).toContain('data-kind="placement"')
@@ -58,6 +65,22 @@ test.skipIf(!isAvailable)(
             width: 55_000_000,
             height: 34_000_000,
           },
+        },
+        {
+          name: "lower-fine-pitch-graphics",
+          viewBox: {
+            x: 14_000_000,
+            y: 20_000_000,
+            width: 55_000_000,
+            height: 34_000_000,
+          },
+          visibleGerberLayers: [
+            "F_Silkscreen",
+            "B_Silkscreen",
+            "F_Fab",
+            "B_Fab",
+            "Edge_Cuts",
+          ],
         },
       ],
     })

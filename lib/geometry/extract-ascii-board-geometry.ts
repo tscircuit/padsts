@@ -951,6 +951,8 @@ interface AsciiPartDecalDefinition {
   name: string
   terminals: AsciiPartDecalTerminal[]
   padStacks: Map<string, AsciiPartDecalPadStack>
+  paths: PadsGeometryPath[]
+  circles: PadsGeometryCircle[]
 }
 
 const isPartDecalHeader = (lineTokens: string[]): boolean =>
@@ -959,6 +961,22 @@ const isPartDecalHeader = (lineTokens: string[]): boolean =>
   lineTokens
     .slice(2, 9)
     .every((token) => parseFiniteNumber(token) !== undefined)
+
+const PART_DECAL_PIECE_KINDS = new Set([
+  "OPEN",
+  "CLOSED",
+  "CIRCLE",
+  "COPCLS",
+  "COPOPN",
+  "COPCIR",
+  "COPCUT",
+  "COPCCO",
+  "KPTCLS",
+  "KPTCIR",
+  "TAG",
+])
+
+const SUPPORTED_PART_DECAL_DRAWING_KINDS = new Set(["OPEN", "CLOSED", "CIRCLE"])
 
 const parsePartDecalPadLayer = ({
   lineTokens,
@@ -1058,6 +1076,8 @@ const parsePartDecalDefinitions = ({
 }): Map<string, AsciiPartDecalDefinition> => {
   const definitions = new Map<string, AsciiPartDecalDefinition>()
   let malformedPadStackCount = 0
+  let malformedPieceArcCount = 0
+  let unsupportedPieceCount = 0
   const versionNumber = Number(/^V(\d+)/u.exec(version)?.[1])
 
   for (const section of sections) {
@@ -1067,8 +1087,13 @@ const parsePartDecalDefinitions = ({
       (Number.isFinite(versionNumber) &&
         versionNumber >= 9 &&
         versionNumber < 2000)
+    const usesPieceLineStyleField = section.lines.some(
+      (lineText) =>
+        lineText.includes("PIECETYPE") && lineText.includes("LINESTYLE"),
+    )
 
     let currentDefinition: AsciiPartDecalDefinition | undefined
+    let remainingPieceCount = 0
     let lineIndex = 0
     while (lineIndex < section.lines.length) {
       const lineTokens = tokenizeLine(section.lines[lineIndex] ?? "")
@@ -1079,14 +1104,138 @@ const parsePartDecalDefinitions = ({
             name,
             terminals: [],
             padStacks: new Map(),
+            paths: [],
+            circles: [],
           }
           definitions.set(name, currentDefinition)
+          remainingPieceCount = Math.max(
+            0,
+            Math.trunc(parseFiniteNumber(lineTokens[4]) ?? 0),
+          )
         }
         lineIndex++
         continue
       }
       if (!currentDefinition) {
         lineIndex++
+        continue
+      }
+
+      const pieceKind = lineTokens[0]?.toUpperCase()
+      if (
+        remainingPieceCount > 0 &&
+        pieceKind &&
+        PART_DECAL_PIECE_KINDS.has(pieceKind)
+      ) {
+        const cornerCount = Math.max(
+          0,
+          Math.trunc(parseFiniteNumber(lineTokens[1]) ?? 0),
+        )
+        const width = Math.abs(parseFiniteNumber(lineTokens[2]) ?? 0)
+        const layer = parseFiniteNumber(
+          lineTokens[usesPieceLineStyleField ? 4 : 3],
+        )
+        const points: PadsGeometryPoint[] = []
+        const segments: PadsGeometryPathSegment[] = []
+        let currentPoint: PadsGeometryPoint | undefined
+        lineIndex++
+
+        let parsedCornerCount = 0
+        while (
+          lineIndex < section.lines.length &&
+          parsedCornerCount < cornerCount
+        ) {
+          const pointTokens = tokenizeLine(section.lines[lineIndex] ?? "")
+          const x = parseFiniteNumber(pointTokens[0])
+          const y = parseFiniteNumber(pointTokens[1])
+          lineIndex++
+          if (x === undefined || y === undefined) continue
+          parsedCornerCount++
+
+          const arcSegment = parseArcVertex({
+            pointTokens,
+            originX: 0,
+            originY: 0,
+          })
+          if (arcSegment) {
+            addLineSegment({
+              segments,
+              start: currentPoint,
+              end: arcSegment.start,
+            })
+            if (
+              points.length === 0 ||
+              !pointsAreEqual(
+                points.at(-1) ?? arcSegment.start,
+                arcSegment.start,
+              )
+            ) {
+              points.push(arcSegment.start)
+            }
+            points.push(arcSegment.end)
+            segments.push(arcSegment)
+            currentPoint = arcSegment.end
+            continue
+          }
+          if (pointTokens.length >= 8) malformedPieceArcCount++
+
+          const point = { x, y }
+          addLineSegment({ segments, start: currentPoint, end: point })
+          points.push(point)
+          currentPoint = point
+        }
+
+        remainingPieceCount--
+        if (!SUPPORTED_PART_DECAL_DRAWING_KINDS.has(pieceKind)) {
+          unsupportedPieceCount++
+          continue
+        }
+        if (pieceKind === "CIRCLE" && points.length >= 2) {
+          const firstPoint = points[0]
+          const secondPoint = points[1]
+          if (firstPoint && secondPoint) {
+            currentDefinition.circles.push({
+              kind: "drawing",
+              center: {
+                x: (firstPoint.x + secondPoint.x) / 2,
+                y: (firstPoint.y + secondPoint.y) / 2,
+              },
+              radius:
+                Math.hypot(
+                  secondPoint.x - firstPoint.x,
+                  secondPoint.y - firstPoint.y,
+                ) / 2,
+              width,
+              layer,
+              name: currentDefinition.name,
+              decalName: currentDefinition.name,
+            })
+          }
+          continue
+        }
+        if (points.length >= 2) {
+          const closed = pieceKind === "CLOSED"
+          if (closed) {
+            const firstPoint = points[0]
+            if (firstPoint) {
+              addLineSegment({
+                segments,
+                start: currentPoint,
+                end: firstPoint,
+              })
+            }
+          }
+          currentDefinition.paths.push({
+            kind: "drawing",
+            points,
+            segments,
+            closed,
+            width,
+            layer,
+            name: currentDefinition.name,
+            decalName: currentDefinition.name,
+          })
+        }
         continue
       }
 
@@ -1150,6 +1299,16 @@ const parsePartDecalDefinitions = ({
   if (malformedPadStackCount > 0) {
     diagnostics.push(
       `${malformedPadStackCount} ASCII part-decal pad stacks ended before all layer records were parsed`,
+    )
+  }
+  if (malformedPieceArcCount > 0) {
+    diagnostics.push(
+      `${malformedPieceArcCount} ASCII part-decal arc records could not be decoded`,
+    )
+  }
+  if (unsupportedPieceCount > 0) {
+    diagnostics.push(
+      `${unsupportedPieceCount} ASCII part-decal copper, keepout, or tag pieces were not added to drawing geometry`,
     )
   }
   return definitions
@@ -1273,6 +1432,150 @@ const transformDecalPoint = ({
       placement.location.y +
       mirroredX * Math.sin(rotationRadians) +
       point.y * Math.cos(rotationRadians),
+  }
+}
+
+const getPhysicalDecalGerberLayer = ({
+  sourceLayer,
+  placement,
+  layers,
+}: {
+  sourceLayer: number | undefined
+  placement: PadsGeometryPlacement
+  layers: PadsGeometryLayerInfo[]
+}): string => {
+  if (sourceLayer === undefined || sourceLayer === 0) {
+    return placement.bottomLayer ? "B_Fab" : "F_Fab"
+  }
+
+  const layerInfo = layers.find((layer) => layer.number === sourceLayer)
+  const sourceSide =
+    layerInfo?.side === "top" || layerInfo?.side === "bottom"
+      ? layerInfo.side
+      : undefined
+  const physicalSide =
+    sourceSide === undefined
+      ? placement.bottomLayer
+        ? "bottom"
+        : "top"
+      : placement.bottomLayer
+        ? sourceSide === "top"
+          ? "bottom"
+          : "top"
+        : sourceSide
+
+  if (layerInfo?.role === "silkscreen") {
+    return physicalSide === "bottom" ? "B_Silkscreen" : "F_Silkscreen"
+  }
+  if (layerInfo?.role === "assembly") {
+    return physicalSide === "bottom" ? "B_Fab" : "F_Fab"
+  }
+  if (layerInfo?.role === "solder-mask") {
+    return physicalSide === "bottom" ? "B_Mask" : "F_Mask"
+  }
+  if (layerInfo?.role === "paste-mask") {
+    return physicalSide === "bottom" ? "B_Paste" : "F_Paste"
+  }
+  if (layerInfo?.role === "drill") return "Drill_Drawing"
+  if (layerInfo?.role === "mechanical" || layerInfo?.role === "unassigned") {
+    return "Dwgs_User"
+  }
+
+  // OPEN/CLOSED/CIRCLE decal pieces are component-outline drawings even when
+  // their source level names a routing layer. Copper-bearing decal pieces use
+  // the distinct COP* record kinds and remain quarantined until decoded.
+  return physicalSide === "bottom" ? "B_Fab" : "F_Fab"
+}
+
+const transformDecalSegment = ({
+  segment,
+  placement,
+}: {
+  segment: PadsGeometryPathSegment
+  placement: PadsGeometryPlacement
+}): PadsGeometryPathSegment => {
+  const start = transformDecalPoint({ point: segment.start, placement })
+  const end = transformDecalPoint({ point: segment.end, placement })
+  if (segment.kind === "line") return { kind: "line", start, end }
+
+  const center = transformDecalPoint({ point: segment.center, placement })
+  return {
+    kind: "arc",
+    start,
+    end,
+    center,
+    radius: segment.radius,
+    startAngle:
+      (Math.atan2(start.y - center.y, start.x - center.x) * 180) / Math.PI,
+    deltaAngle: placement.bottomLayer
+      ? -segment.deltaAngle
+      : segment.deltaAngle,
+  }
+}
+
+const addPlacedPartGraphics = ({
+  placements,
+  definitions,
+  layers,
+  paths,
+  circles,
+}: {
+  placements: PadsGeometryPlacement[]
+  definitions: Map<string, AsciiPartDecalDefinition>
+  layers: PadsGeometryLayerInfo[]
+  paths: PadsGeometryPath[]
+  circles: PadsGeometryCircle[]
+}): void => {
+  for (const placement of placements) {
+    const decalName = placement.footprintName
+    const definition = decalName ? definitions.get(decalName) : undefined
+    if (!decalName || !definition) continue
+
+    for (const path of definition.paths) {
+      const sourceLayer =
+        typeof path.layer === "number" && Number.isFinite(path.layer)
+          ? Math.trunc(path.layer)
+          : undefined
+      paths.push({
+        ...path,
+        points: path.points.map((point) =>
+          transformDecalPoint({ point, placement }),
+        ),
+        segments: path.segments?.map((segment) =>
+          transformDecalSegment({ segment, placement }),
+        ),
+        gerberLayer: getPhysicalDecalGerberLayer({
+          sourceLayer,
+          placement,
+          layers,
+        }),
+        name: `${placement.reference}:${decalName}`,
+        reference: placement.reference,
+        decalName,
+      })
+    }
+
+    for (const circle of definition.circles) {
+      const sourceLayer =
+        typeof circle.layer === "number" && Number.isFinite(circle.layer)
+          ? Math.trunc(circle.layer)
+          : undefined
+      circles.push({
+        ...circle,
+        center: transformDecalPoint({
+          point: circle.center,
+          placement,
+        }),
+        gerberLayer: getPhysicalDecalGerberLayer({
+          sourceLayer,
+          placement,
+          layers,
+        }),
+        name: `${placement.reference}:${decalName}`,
+        reference: placement.reference,
+        decalName,
+      })
+    }
   }
 }
 
@@ -1425,20 +1728,206 @@ const addPlacedPartPads = ({
   }
 }
 
-const parseLayerInfo = (
+const getLayerRole = ({
+  name,
+  type,
+  defaultToCopper,
+}: {
+  name: string
+  type?: string
+  defaultToCopper: boolean
+}): PadsGeometryLayerInfo["role"] => {
+  const normalizedName = name.toUpperCase()
+  const normalizedType = type?.toUpperCase()
+  if (
+    normalizedType === "ROUTING" ||
+    normalizedType === "ROUTE" ||
+    normalizedType === "PLANE"
+  ) {
+    return "copper"
+  }
+  if (
+    normalizedType === "SILK_SCREEN" ||
+    normalizedName.includes("SILKSCREEN")
+  ) {
+    return "silkscreen"
+  }
+  if (
+    normalizedType === "SOLDER_MASK" ||
+    normalizedName.includes("SOLDER MASK")
+  ) {
+    return "solder-mask"
+  }
+  if (
+    normalizedType === "PASTE_MASK" ||
+    normalizedName.includes("PASTE MASK")
+  ) {
+    return "paste-mask"
+  }
+  if (
+    normalizedType === "ASSEMBLY" ||
+    normalizedName.includes("ASSEMBLY") ||
+    normalizedName.includes("P&P")
+  ) {
+    return "assembly"
+  }
+  if (normalizedType === "DRILL" || normalizedName.includes("DRILL")) {
+    return "drill"
+  }
+  if (
+    normalizedName.includes("BOARD OUTLINE") ||
+    normalizedName.includes("SIZE DRAWING")
+  ) {
+    return "mechanical"
+  }
+  return defaultToCopper ? "copper" : "unassigned"
+}
+
+const getLayerSide = ({
+  name,
+  role,
+}: {
+  name: string
+  role: PadsGeometryLayerInfo["role"]
+}): PadsGeometryLayerInfo["side"] => {
+  const normalizedName = name.toUpperCase()
+  if (normalizedName.includes("TOP")) return "top"
+  if (normalizedName.includes("BOTTOM") || normalizedName.includes("BOT")) {
+    return "bottom"
+  }
+  return role === "copper" ? "internal" : "none"
+}
+
+const makeLayerInfo = ({
+  number,
+  name,
+  type,
+  defaultToCopper,
+}: {
+  number: number
+  name: string
+  type?: string
+  defaultToCopper: boolean
+}): PadsGeometryLayerInfo => {
+  const role = getLayerRole({ name, type, defaultToCopper })
+  return {
+    number,
+    name,
+    ...(type ? { type } : {}),
+    role,
+    side: getLayerSide({ name, role }),
+  }
+}
+
+const parseMiscLayerInfo = (
   sections: AsciiSectionLines[],
 ): PadsGeometryLayerInfo[] => {
   const layers: PadsGeometryLayerInfo[] = []
+  for (const section of sections) {
+    if (section.name !== "MISC") continue
+
+    let awaitingLayerDataBody = false
+    let insideLayerData = false
+    let depth = 0
+    let pendingLayerNumber: number | undefined
+    let currentLayer:
+      | { number: number; name?: string; type?: string }
+      | undefined
+
+    for (const lineText of section.lines) {
+      const trimmedLine = lineText.trim()
+      const lineTokens = tokenizeLine(lineText)
+      if (!insideLayerData) {
+        if (
+          lineTokens.length === 2 &&
+          lineTokens[0] === "LAYER" &&
+          lineTokens[1] === "DATA"
+        ) {
+          awaitingLayerDataBody = true
+          continue
+        }
+        if (awaitingLayerDataBody && trimmedLine === "{") {
+          insideLayerData = true
+          awaitingLayerDataBody = false
+          depth = 1
+        }
+        continue
+      }
+
+      if (trimmedLine === "{") {
+        depth++
+        if (depth === 2 && pendingLayerNumber !== undefined) {
+          currentLayer = { number: pendingLayerNumber }
+          pendingLayerNumber = undefined
+        }
+        continue
+      }
+      if (trimmedLine === "}") {
+        if (depth === 2 && currentLayer) {
+          if (currentLayer.number > 0 && currentLayer.name) {
+            layers.push(
+              makeLayerInfo({
+                number: currentLayer.number,
+                name: currentLayer.name,
+                type: currentLayer.type,
+                defaultToCopper: false,
+              }),
+            )
+          }
+          currentLayer = undefined
+        }
+        depth--
+        if (depth <= 0) {
+          insideLayerData = false
+          break
+        }
+        continue
+      }
+
+      if (depth === 1 && lineTokens.length === 2 && lineTokens[0] === "LAYER") {
+        const layerNumber = parseFiniteNumber(lineTokens[1])
+        pendingLayerNumber =
+          layerNumber === undefined ? undefined : Math.trunc(layerNumber)
+        continue
+      }
+      if (depth !== 2 || !currentLayer) continue
+      if (lineTokens[0] === "LAYER_NAME" && lineTokens.length > 1) {
+        currentLayer.name = lineTokens.slice(1).join(" ")
+      } else if (lineTokens[0] === "LAYER_TYPE" && lineTokens[1]) {
+        currentLayer.type = lineTokens[1]
+      }
+    }
+  }
+  return layers
+}
+
+const parseLayerInfo = (
+  sections: AsciiSectionLines[],
+): PadsGeometryLayerInfo[] => {
+  const layerByNumber = new Map<number, PadsGeometryLayerInfo>()
   for (const section of sections) {
     if (section.name !== "LAYER") continue
     for (const lineText of section.lines) {
       const lineTokens = tokenizeLine(lineText)
       const layerNumber = parseFiniteNumber(lineTokens[0])
       if (layerNumber === undefined || !lineTokens[1]) continue
-      layers.push({ number: layerNumber, name: lineTokens.slice(1).join(" ") })
+      const normalizedLayerNumber = Math.trunc(layerNumber)
+      layerByNumber.set(
+        normalizedLayerNumber,
+        makeLayerInfo({
+          number: normalizedLayerNumber,
+          name: lineTokens.slice(1).join(" "),
+          defaultToCopper: true,
+        }),
+      )
     }
   }
-  return layers
+  for (const layer of parseMiscLayerInfo(sections)) {
+    layerByNumber.set(layer.number, layer)
+  }
+  return [...layerByNumber.values()].sort(
+    (firstLayer, secondLayer) => firstLayer.number - secondLayer.number,
+  )
 }
 
 const parseLayerCount = (
@@ -1456,7 +1945,12 @@ const parseLayerCount = (
       if (layerCount !== undefined) return Math.trunc(layerCount)
     }
   }
-  return layers.length || 2
+  const copperLayerNumbers = layers
+    .filter((layer) => layer.role === "copper")
+    .map((layer) => layer.number)
+  return copperLayerNumbers.length > 0
+    ? Math.max(...copperLayerNumbers)
+    : layers.length || 2
 }
 
 export const extractAsciiBoardGeometry = (
@@ -1511,6 +2005,13 @@ export const extractAsciiBoardGeometry = (
     pads,
     holes,
     diagnostics,
+  })
+  addPlacedPartGraphics({
+    placements,
+    definitions: partDecalDefinitions,
+    layers,
+    paths,
+    circles,
   })
 
   return {

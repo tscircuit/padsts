@@ -39,8 +39,11 @@ export interface PadsGeometryPath {
   closed: boolean
   width: number
   layer?: number | string
+  gerberLayer?: string
   name?: string
   netName?: string
+  reference?: string
+  decalName?: string
 }
 
 export type PadsGeometryCircleKind = "via" | "copper" | "keepout" | "drawing"
@@ -62,8 +65,11 @@ export interface PadsGeometryCircle {
   endLayer?: number
   width: number
   layer?: number | string
+  gerberLayer?: string
   name?: string
   netName?: string
+  reference?: string
+  decalName?: string
 }
 
 export interface PadsGeometryText {
@@ -114,6 +120,17 @@ export interface PadsGeometryHole {
 export interface PadsGeometryLayerInfo {
   number: number
   name: string
+  type?: string
+  role?:
+    | "copper"
+    | "solder-mask"
+    | "paste-mask"
+    | "silkscreen"
+    | "assembly"
+    | "drill"
+    | "mechanical"
+    | "unassigned"
+  side?: "top" | "bottom" | "internal" | "none"
 }
 
 export interface PadsBinarySectionSummary {

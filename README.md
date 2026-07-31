@@ -64,8 +64,14 @@ square, rectangular-finger, and oval-finger surface pads are resolved through
 part types and transformed onto top or bottom copper. Mounted-side round and
 slotted drills preserve plating, slot orientation and offset, and render in an
 Excellon-style `Drill` group independently of offset copper fingers. Rounded
-and chamfered square/rectangular pads are also preserved. Experimental
-native-binary route and via candidates are withheld from fabrication layers.
+and chamfered square/rectangular pads are also preserved. Basic part-decal
+`OPEN`, `CLOSED`, and `CIRCLE` graphics, including exact circular arcs, are
+transformed through top and mirrored bottom placements. Layer names, types,
+roles, and sides decoded from `LAYER` and nested `MISC` `LAYER DATA` records
+place these graphics on front/back silkscreen, fabrication, mask, paste,
+drill-drawing, or user-drawing groups without treating ordinary component
+outlines as copper. Experimental native-binary route and via candidates are
+withheld from fabrication layers.
 
 Parser diagnostics and decoded counts are retained in SVG metadata. Optional
 binary section and unresolved-vertex overlays can be enabled explicitly:

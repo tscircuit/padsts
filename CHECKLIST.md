@@ -108,9 +108,11 @@ with a typed ASCII AST.
   - [ ] Default trace, via, clearance, and grid settings.
   - [ ] Any version or application metadata.
 - [ ] Parse `LAYER` records.
-  - [ ] Layer number, name, type, electrical role, and side.
-  - [ ] Layer stack ordering.
-  - [ ] Plane, routing, mask, paste, silkscreen, assembly, and mechanical roles.
+  - [x] Layer number, name, type, electrical role, and side from both the
+    simple `LAYER` section and nested `MISC` `LAYER DATA`.
+  - [x] Layer stack ordering by numeric source layer.
+  - [x] Plane, routing, mask, paste, silkscreen, assembly, drill, and
+    mechanical roles.
   - [ ] Explicit mapping to normalized fabrication layer names.
 
 ### Lines, outlines, and text
@@ -191,6 +193,10 @@ with a typed ASCII AST.
     - [x] Resolve default pin-0 and pin-specific pad stacks for placed
       terminals.
   - [ ] Silkscreen, assembly, courtyard, and fabrication graphics.
+    - [x] Decode straight, circular, and exact-arc `OPEN`, `CLOSED`, and
+      `CIRCLE` pieces and retain their source layer.
+    - [x] Transform those pieces through top and mirrored bottom placements.
+    - [ ] Decode decal copper, keepout, tag, and other piece kinds.
   - [ ] Reference/value text templates.
   - [ ] Copper, keepout, and placement-outline primitives.
 - [ ] Parse `PARTTYPE` definitions.
@@ -211,7 +217,10 @@ with a typed ASCII AST.
   - [x] Render resolved component pads on transformed top and bottom copper
     layers.
   - [x] Render transformed round and slotted component holes.
-  - [ ] Render decal graphics, text, and remaining unsupported pad shapes.
+  - [x] Render basic decal drawing pieces on normalized silkscreen,
+    fabrication, and drawing layers.
+  - [ ] Render decal text, copper/keepout pieces, and remaining unsupported pad
+    shapes.
 
 ### Nets, routes, and test points
 
@@ -448,7 +457,8 @@ partial and based on a small number of observed record offsets.
   - [x] Render round, square, rectangular, and oval surface pads with
     placement rotation, bottom-side mirroring, and finger offsets.
   - [x] Render round drills, slotted drills, and rounded/chamfered copper pads.
-  - [ ] Render decal graphics and decal text.
+  - [x] Render straight, circular, and exact-arc decal graphics.
+  - [ ] Render decal copper/keepout pieces and decal text.
 - [ ] Render verified pad-stack shapes and drill geometry.
   - [x] Render resolved ASCII round and square via apertures with exact drill
     radii and layer-span metadata.
@@ -462,8 +472,11 @@ partial and based on a small number of observed record offsets.
 - [ ] Render verified board edges and cutouts for every binary version.
 - [ ] Add solder-mask, solder-paste, fabrication, assembly, courtyard, and
   keepout layers when the source contains them.
+  - [x] Map decoded basic decal drawings onto front/back silkscreen,
+    fabrication, mask, paste, drill-drawing, and user-drawing groups.
 - [ ] Render pours with cutouts and thermal reliefs.
 - [ ] Make bottom-side mirroring match fabrication conventions.
+  - [x] Mirror and rotate basic decal paths, circles, and arc sweep direction.
 - [ ] Convert fabrication text to deterministic vector strokes so snapshots do
   not depend on system fonts.
 - [ ] Make bounds robust against corrupt or partially decoded entities.
@@ -481,7 +494,8 @@ partial and based on a small number of observed record offsets.
   - [x] Arbitrary board-coordinate detail windows for close-up inspection.
 - [ ] Use stable, source-linked element IDs and `data-*` attributes.
 - [ ] Add semantic assertions alongside image snapshots.
-  - [ ] Expected layer names.
+  - [x] Expected layer names and normalized silkscreen/assembly roles for the
+    focused decal fixture and real ASCII references.
   - [ ] Expected entity counts.
     - [x] Assert exact routed-via counts for the LCORE2, Dexter, and EMS4 ASCII
       references.
@@ -489,11 +503,15 @@ partial and based on a small number of observed record offsets.
       and TMS ASCII references.
     - [x] Assert resolved component-hole counts and plating totals for the
       LCORE2, Dexter, EMS4, and TMS ASCII references.
+    - [x] Assert decoded decal path and circle counts for the LCORE2, Dexter,
+      EMS4, and TMS ASCII references.
   - [ ] Representative coordinates and dimensions.
     - [x] Assert representative resolved via sizes, drill sizes, shapes, and
       layer spans.
     - [x] Assert transformed round/slot dimensions, centers, rotations,
       plating, and rounded/chamfered pad semantics.
+    - [x] Assert transformed top/bottom decal arc centers, endpoints, rotations,
+      and mirrored sweep direction.
   - [ ] No unexpected decoder diagnostics.
 - [ ] Compare rendered geometry with an independent importer, not only prior
   `padsts` snapshots.
@@ -574,6 +592,9 @@ partial and based on a small number of observed record offsets.
     oval-finger component pads with per-layer SVG snapshots.
   - [x] Cover plated/non-plated round and slotted component holes plus rounded
     and chamfered pads with composite, top, bottom, and drill-only snapshots.
+  - [x] Cover source-layer roles and transformed top/bottom straight, circular,
+    closed, and exact-arc decal graphics with isolated silkscreen/fab
+    snapshots.
 - [ ] Add minimal synthetic binary fixtures for every versioned record layout.
 - [ ] Add malformed-record tests inside sections, not only malformed container
   tests.
