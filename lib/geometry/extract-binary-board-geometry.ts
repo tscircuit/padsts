@@ -3,6 +3,9 @@ import type {
   PadsBinaryDocument,
   PadsBinarySection,
 } from "../binary"
+import { BinarySectionReader } from "../binary"
+import type { PadsBinarySourceProvenance } from "../source-provenance"
+import { normalizeGeometryUnits } from "./normalize-geometry-units"
 import type {
   PadsBinarySectionSummary,
   PadsBoardGeometry,
@@ -16,73 +19,6 @@ import type {
 
 const ANGLE_SCALE = 1_800_000
 
-class BinarySectionReader {
-  readonly bytes: Uint8Array
-
-  constructor(bytes: Uint8Array) {
-    this.bytes = bytes
-  }
-
-  readUint8(offset: number): number | undefined {
-    return this.bytes[offset]
-  }
-
-  readUint16(offset: number): number | undefined {
-    const firstByte = this.bytes[offset]
-    const secondByte = this.bytes[offset + 1]
-    if (firstByte === undefined || secondByte === undefined) return undefined
-    return firstByte + secondByte * 0x100
-  }
-
-  readUint32(offset: number): number | undefined {
-    const firstByte = this.bytes[offset]
-    const secondByte = this.bytes[offset + 1]
-    const thirdByte = this.bytes[offset + 2]
-    const fourthByte = this.bytes[offset + 3]
-    if (
-      firstByte === undefined ||
-      secondByte === undefined ||
-      thirdByte === undefined ||
-      fourthByte === undefined
-    ) {
-      return undefined
-    }
-
-    return (
-      firstByte +
-      secondByte * 0x100 +
-      thirdByte * 0x10000 +
-      fourthByte * 0x1000000
-    )
-  }
-
-  readInt32(offset: number): number | undefined {
-    const unsignedNumber = this.readUint32(offset)
-    if (unsignedNumber === undefined) return undefined
-    return unsignedNumber > 0x7fffffff
-      ? unsignedNumber - 0x1_0000_0000
-      : unsignedNumber
-  }
-
-  readFixedString(offset: number, maximumLength: number): string {
-    const availableEnd = Math.min(offset + maximumLength, this.bytes.length)
-    if (offset < 0 || offset >= availableEnd) return ""
-
-    let stringEnd = offset
-    while (
-      stringEnd < availableEnd &&
-      this.bytes[stringEnd] !== 0 &&
-      this.bytes[stringEnd] !== 0xff
-    ) {
-      stringEnd++
-    }
-
-    return new TextDecoder()
-      .decode(this.bytes.slice(offset, stringEnd))
-      .trimEnd()
-  }
-}
-
 const getSection = (
   document: PadsBinaryDocument,
   index: number,
@@ -90,6 +26,32 @@ const getSection = (
 
 const getBytesPerRecord = (entry: PadsBinaryDirectoryEntry): number =>
   entry.recordCount > 0 ? entry.byteLength / entry.recordCount : 0
+
+const getBinaryRecordSource = ({
+  section,
+  recordIndex,
+  recordSize,
+}: {
+  section: PadsBinarySection
+  recordIndex: number
+  recordSize: number
+}): PadsBinarySourceProvenance => {
+  const startOffset =
+    section.directoryEntry.sectionOffset + recordIndex * recordSize
+  return {
+    format: "binary",
+    sourceId: `binary:${section.index}:${recordIndex}`,
+    sectionIndex: section.index,
+    recordIndex,
+    span: {
+      startOffset,
+      endOffset: Math.min(
+        startOffset + recordSize,
+        section.directoryEntry.sectionOffset + section.bytes.byteLength,
+      ),
+    },
+  }
+}
 
 const getOrigin = (document: PadsBinaryDocument): PadsGeometryPoint => {
   const setupSection = getSection(document, 1)
@@ -135,7 +97,14 @@ const readLineVertices = ({
     const x = vertexReader.readInt32(recordOffset)
     const y = vertexReader.readInt32(recordOffset + 4)
     if (x === undefined || y === undefined) continue
-    vertices.push(toBoardPoint({ x, y, origin }))
+    vertices.push({
+      ...toBoardPoint({ x, y, origin }),
+      source: getBinaryRecordSource({
+        section: vertexSection,
+        recordIndex: vertexIndex,
+        recordSize: 12,
+      }),
+    })
   }
   return vertices
 }
@@ -186,6 +155,11 @@ const addDecodedOutline = ({
     if (outlinePoints.length < 3) continue
 
     paths.push({
+      source: getBinaryRecordSource({
+        section: outlineSection,
+        recordIndex,
+        recordSize: 16,
+      }),
       kind: "drawing",
       points: outlinePoints,
       closed: true,
@@ -292,6 +266,11 @@ const addTextRecords = ({
     }
 
     texts.push({
+      source: getBinaryRecordSource({
+        section: textSection,
+        recordIndex,
+        recordSize,
+      }),
       content,
       location: toBoardPoint({ x, y, origin }),
       height: Math.abs(height),
@@ -415,6 +394,11 @@ const addUnverifiedRouteCandidates = ({
     if (!startPoint || !endPoint) continue
 
     unverifiedConnections.push({
+      source: getBinaryRecordSource({
+        section: connectionSection,
+        recordIndex,
+        recordSize: connectionRecordSize,
+      }),
       kind: "route",
       points: [startPoint, endPoint],
       closed: false,
@@ -439,7 +423,14 @@ const addUnverifiedRouteCandidates = ({
     const x = viaReader.readInt32(recordOffset + markerOffset + 1)
     const y = viaReader.readInt32(recordOffset + markerOffset + 5)
     if (x === undefined || y === undefined) continue
-    unverifiedViaLocations.push(toBoardPoint({ x, y, origin }))
+    unverifiedViaLocations.push({
+      ...toBoardPoint({ x, y, origin }),
+      source: getBinaryRecordSource({
+        section: viaSection,
+        recordIndex,
+        recordSize: viaRecordSize,
+      }),
+    })
   }
 
   if (unverifiedConnections.length > 0 || unverifiedViaLocations.length > 0) {
@@ -493,6 +484,11 @@ const addPlacementGeometry = ({
     }
 
     placements.push({
+      source: getBinaryRecordSource({
+        section: placementSection,
+        recordIndex,
+        recordSize,
+      }),
       reference,
       location: toBoardPoint({ x, y, origin }),
       rotation: rawRotation / ANGLE_SCALE,
@@ -557,21 +553,26 @@ export const extractBinaryBoardGeometry = (
   addPlacementGeometry({ document, origin, placements, diagnostics })
 
   const layerCount = getLayerCount(document)
-  return {
-    sourceFormat: "binary",
-    version: `0x${document.version.toString(16)}`,
-    layerCount,
-    layers: getLayerInfo(layerCount),
-    paths,
-    circles,
-    texts,
-    placements,
-    pads: [],
-    holes: [],
-    unassignedVertices: vertices,
-    unverifiedConnections,
-    unverifiedViaLocations,
-    binarySections: getSectionSummaries(document),
-    diagnostics,
-  }
+  return normalizeGeometryUnits({
+    sourceUnits: "BASIC",
+    geometry: {
+      sourceFormat: "binary",
+      version: `0x${document.version.toString(16)}`,
+      sourceUnits: "BASIC",
+      coordinateUnit: "nanometer",
+      layerCount,
+      layers: getLayerInfo(layerCount),
+      paths,
+      circles,
+      texts,
+      placements,
+      pads: [],
+      holes: [],
+      unassignedVertices: vertices,
+      unverifiedConnections,
+      unverifiedViaLocations,
+      binarySections: getSectionSummaries(document),
+      diagnostics,
+    },
+  })
 }

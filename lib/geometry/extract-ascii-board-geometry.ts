@@ -1,4 +1,10 @@
-import type { PadsAsciiDocument } from "../ascii"
+import {
+  type PadsAsciiDocument,
+  type PadsAsciiRecord,
+  tokenizePadsAsciiRecord,
+} from "../ascii"
+import type { PadsSourceProvenance } from "../source-provenance"
+import { normalizeGeometryUnits } from "./normalize-geometry-units"
 import type {
   PadsBoardGeometry,
   PadsGeometryCircle,
@@ -18,28 +24,11 @@ import type {
 interface AsciiSectionLines {
   name: string
   lines: string[]
+  records: PadsAsciiRecord[]
 }
 
-const TOP_LEVEL_SECTION_NAMES = new Set([
-  "PCB",
-  "REUSE",
-  "TEXT",
-  "LINES",
-  "VIA",
-  "PARTDECAL",
-  "PARTTYPE",
-  "PART",
-  "NET",
-  "ROUTE",
-  "POUR",
-  "TESTPOINT",
-  "MISC",
-  "LAYER",
-  "END",
-])
-
 const tokenizeLine = (lineText: string): string[] =>
-  lineText.trim().split(/\s+/u).filter(Boolean)
+  tokenizePadsAsciiRecord(lineText).map((token) => token.value)
 
 const parseFiniteNumber = (token: string | undefined): number | undefined => {
   if (token === undefined) return undefined
@@ -137,26 +126,14 @@ const parseArcVertex = ({
   }
 }
 
-const getHeaderToken = (lineText: string): string | undefined =>
-  /^\*([^*\s]+)\*/u.exec(lineText.trim())?.[1]
-
-const collectTopLevelSections = (sourceText: string): AsciiSectionLines[] => {
-  const sections: AsciiSectionLines[] = []
-  let currentSection: AsciiSectionLines | undefined
-
-  for (const lineText of sourceText.split(/\r\n|\r|\n/u)) {
-    const headerToken = getHeaderToken(lineText)
-    if (headerToken && TOP_LEVEL_SECTION_NAMES.has(headerToken)) {
-      currentSection = { name: headerToken, lines: [] }
-      sections.push(currentSection)
-      continue
-    }
-
-    currentSection?.lines.push(lineText)
-  }
-
-  return sections
-}
+const collectTopLevelSections = (
+  document: PadsAsciiDocument,
+): AsciiSectionLines[] =>
+  document.sections.map((section) => ({
+    name: section.name,
+    lines: section.records.map((record) => record.contentText),
+    records: section.records,
+  }))
 
 const getPathKind = (objectType: string): PadsGeometryPathKind => {
   if (objectType === "BOARD") return "outline"
@@ -168,7 +145,7 @@ const getPathKind = (objectType: string): PadsGeometryPathKind => {
   ) {
     return "keepout"
   }
-  if (objectType.includes("COPPER")) return "copper"
+  if (objectType.includes("COPPER") || objectType === "COPCUT") return "copper"
   return "drawing"
 }
 
@@ -206,6 +183,7 @@ const addLineSectionGeometry = ({
   let malformedArcCount = 0
 
   while (lineIndex < section.lines.length) {
+    const objectSource = section.records[lineIndex]?.provenance
     const objectTokens = tokenizeLine(section.lines[lineIndex] ?? "")
     if (!isLineObjectHeader(objectTokens)) {
       lineIndex++
@@ -234,6 +212,12 @@ const addLineSectionGeometry = ({
       if (!isPieceHeader(pieceTokens)) break
 
       const pieceKind = pieceTokens[0] ?? "OPEN"
+      const polarity =
+        objectType === "COPCUT" ||
+        pieceKind === "COPCUT" ||
+        pieceKind === "COPCCO"
+          ? "negative"
+          : "positive"
       const cornerCount = Math.max(
         0,
         Math.trunc(parseFiniteNumber(pieceTokens[1]) ?? 0),
@@ -299,6 +283,7 @@ const addLineSectionGeometry = ({
         const secondPoint = points[1]
         if (firstPoint && secondPoint) {
           circles.push({
+            source: objectSource,
             kind: getCircleKind(pathKind),
             center: {
               x: (firstPoint.x + secondPoint.x) / 2,
@@ -312,13 +297,19 @@ const addLineSectionGeometry = ({
             width,
             layer,
             name: objectName,
+            sourcePieceKind: pieceKind,
+            polarity,
           })
         }
         continue
       }
 
       if (points.length >= 2) {
-        const closed = pieceKind === "CLOSED" || pieceKind.endsWith("CLS")
+        const closed =
+          pieceKind === "CLOSED" ||
+          pieceKind.endsWith("CLS") ||
+          pieceKind === "COPCUT" ||
+          pieceKind === "COPCCO"
         if (closed) {
           const firstPoint = points[0]
           if (firstPoint) {
@@ -330,6 +321,7 @@ const addLineSectionGeometry = ({
           }
         }
         paths.push({
+          source: objectSource,
           kind: pathKind,
           points,
           segments,
@@ -337,6 +329,8 @@ const addLineSectionGeometry = ({
           width,
           layer,
           name: objectName,
+          sourcePieceKind: pieceKind,
+          polarity,
         })
       }
     }
@@ -351,6 +345,7 @@ const addLineSectionGeometry = ({
 
 interface AsciiViaDefinition {
   name: string
+  source?: PadsSourceProvenance
   drillRadius: number
   pads: AsciiViaPadDefinition[]
   startLayer?: number
@@ -381,6 +376,7 @@ const parseViaDefinitions = ({
 
     let lineIndex = 0
     while (lineIndex < section.lines.length) {
+      const source = section.records[lineIndex]?.provenance
       const headerTokens = tokenizeLine(section.lines[lineIndex] ?? "")
       const name = headerTokens[0]
       const drillDiameter = parseFiniteNumber(headerTokens[1])
@@ -455,6 +451,7 @@ const parseViaDefinitions = ({
 
       definitions.set(name, {
         name,
+        source,
         drillRadius: drillDiameter / 2,
         pads,
         ...(startLayer !== undefined && endLayer !== undefined
@@ -594,11 +591,13 @@ const addRouteSectionGeometry = ({
     name,
     startLayer,
     endLayer,
+    source,
   }: {
     location: PadsGeometryPoint
     name: string
     startLayer?: number
     endLayer?: number
+    source?: PadsSourceProvenance
   }): void => {
     const definition = viaDefinitions.get(name)
     if (!definition) {
@@ -644,6 +643,7 @@ const addRouteSectionGeometry = ({
         (pad) => pad.layer === resolvedPadStack.startLayer,
       ) ?? largestPad
     circles.push({
+      source,
       kind: "via",
       center: location,
       radius: largestPad.radius,
@@ -721,10 +721,14 @@ const addRouteSectionGeometry = ({
   const layerIsCopper = (layer: number): boolean =>
     layer >= 1 && layer <= layerCount
 
-  for (const lineText of section.lines) {
+  let netSource: PadsSourceProvenance | undefined
+  for (let lineIndex = 0; lineIndex < section.lines.length; lineIndex++) {
+    const lineText = section.lines[lineIndex] ?? ""
+    const source = section.records[lineIndex]?.provenance
     const signalMatch = /^\*SIGNAL\*\s*(\S*)/u.exec(lineText.trim())
     if (signalMatch) {
       netName = signalMatch[1] ?? ""
+      netSource = source
       resetRouteState()
       continue
     }
@@ -741,10 +745,11 @@ const addRouteSectionGeometry = ({
       const name = lineTokens[3]
       if (x !== undefined && y !== undefined && name) {
         addVia({
-          location: { x, y },
+          location: { x, y, source },
           name,
           startLayer: parseFiniteNumber(lineTokens[4]),
           endLayer: parseFiniteNumber(lineTokens[5]),
+          source,
         })
       }
       resetRouteState()
@@ -762,7 +767,7 @@ const addRouteSectionGeometry = ({
 
     const layer =
       rawLayer === 65 ? (previousPoint?.layer ?? rawLayer) : rawLayer
-    const currentPoint = { x, y, layer, width }
+    const currentPoint = { x, y, layer, width, source }
     const arcDirection = lineTokens
       .slice(5)
       .find((token): token is "CW" | "CCW" => token === "CW" || token === "CCW")
@@ -811,6 +816,7 @@ const addRouteSectionGeometry = ({
           malformedArcCount++
         } else {
           paths.push({
+            source: previousPoint.source ?? source ?? netSource,
             kind: "route",
             points: [previousPoint, currentPoint],
             ...(arcSegment ? { segments: [arcSegment] } : {}),
@@ -829,8 +835,9 @@ const addRouteSectionGeometry = ({
       lineTokens.slice(5).find((token) => token.toUpperCase().includes("VIA"))
     if (viaName) {
       addVia({
-        location: { x, y },
+        location: { x, y, source },
         name: viaName,
+        source,
       })
     }
 
@@ -908,6 +915,7 @@ const addTextSectionGeometry = (
     if (!content || content.startsWith("*")) continue
 
     texts.push({
+      source: section.records[lineIndex]?.provenance,
       content,
       location: { x, y },
       height: Math.abs(height),
@@ -923,9 +931,11 @@ const addTextSectionGeometry = (
 interface AsciiPartDecalTerminal {
   location: PadsGeometryPoint
   pinNumber: string
+  source?: PadsSourceProvenance
 }
 
 interface AsciiPartDecalPadLayer {
+  source?: PadsSourceProvenance
   sourceLevel: number
   size: number
   shapeCode: string
@@ -949,6 +959,7 @@ interface AsciiPartDecalPadStack {
 
 interface AsciiPartDecalDefinition {
   name: string
+  source?: PadsSourceProvenance
   terminals: AsciiPartDecalTerminal[]
   padStacks: Map<string, AsciiPartDecalPadStack>
   paths: PadsGeometryPath[]
@@ -980,20 +991,34 @@ const SUPPORTED_PART_DECAL_COPPER_KINDS = new Set([
   "COPCLS",
   "COPOPN",
   "COPCIR",
+  "COPCUT",
+  "COPCCO",
 ])
 
 const SUPPORTED_PART_DECAL_KEEPOUT_KINDS = new Set(["KPTCLS", "KPTCIR"])
 
-const PART_DECAL_CIRCLE_KINDS = new Set(["CIRCLE", "COPCIR", "KPTCIR"])
+const PART_DECAL_CIRCLE_KINDS = new Set([
+  "CIRCLE",
+  "COPCIR",
+  "COPCCO",
+  "KPTCIR",
+])
 
-const PART_DECAL_CLOSED_KINDS = new Set(["CLOSED", "COPCLS", "KPTCLS"])
+const PART_DECAL_CLOSED_KINDS = new Set([
+  "CLOSED",
+  "COPCLS",
+  "COPCUT",
+  "KPTCLS",
+])
 
 const parsePartDecalPadLayer = ({
   lineTokens,
   usesCornerRadiusFields,
+  source,
 }: {
   lineTokens: string[]
   usesCornerRadiusFields: boolean
+  source?: PadsSourceProvenance
 }): AsciiPartDecalPadLayer | undefined => {
   const sourceLevel = parseFiniteNumber(lineTokens[0])
   const size = parseFiniteNumber(lineTokens[1])
@@ -1058,6 +1083,7 @@ const parsePartDecalPadLayer = ({
   const hasUnsupportedTrailingGeometry = trailingValueIndex < lineTokens.length
 
   return {
+    source,
     sourceLevel: Math.trunc(sourceLevel),
     size: Math.abs(size),
     shapeCode,
@@ -1087,7 +1113,6 @@ const parsePartDecalDefinitions = ({
   const definitions = new Map<string, AsciiPartDecalDefinition>()
   let malformedPadStackCount = 0
   let malformedPieceArcCount = 0
-  let unsupportedCutoutPieceCount = 0
   let allLayerCopperPieceCount = 0
   let malformedTagCount = 0
   const versionNumber = Number(/^V(\d+)/u.exec(version)?.[1])
@@ -1110,6 +1135,7 @@ const parsePartDecalDefinitions = ({
     let activeTagGroups: { id: string; pinNumber?: string }[] = []
     let lineIndex = 0
     while (lineIndex < section.lines.length) {
+      const source = section.records[lineIndex]?.provenance
       const lineTokens = tokenizeLine(section.lines[lineIndex] ?? "")
       if (isPartDecalHeader(lineTokens)) {
         malformedTagCount += activeTagGroups.length
@@ -1118,6 +1144,7 @@ const parsePartDecalDefinitions = ({
         if (name) {
           currentDefinition = {
             name,
+            source,
             terminals: [],
             padStacks: new Map(),
             paths: [],
@@ -1143,6 +1170,7 @@ const parsePartDecalDefinitions = ({
         pieceKind &&
         PART_DECAL_PIECE_KINDS.has(pieceKind)
       ) {
+        const pieceSource = source
         const cornerCount = Math.max(
           0,
           Math.trunc(parseFiniteNumber(lineTokens[1]) ?? 0),
@@ -1228,10 +1256,6 @@ const parsePartDecalDefinitions = ({
           }
           continue
         }
-        if (pieceKind === "COPCUT" || pieceKind === "COPCCO") {
-          unsupportedCutoutPieceCount++
-          continue
-        }
         if (SUPPORTED_PART_DECAL_COPPER_KINDS.has(pieceKind) && layer === 0) {
           allLayerCopperPieceCount++
           continue
@@ -1246,11 +1270,15 @@ const parsePartDecalDefinitions = ({
         const activeTagGroup = activeTagGroups.at(-1)
         const pinNumber = explicitPinNumber ?? activeTagGroup?.pinNumber
         const sharedPieceProperties = {
+          source: pieceSource,
           layer,
           name: currentDefinition.name,
           decalName: currentDefinition.name,
           sourcePieceKind: pieceKind,
-          polarity: "positive" as const,
+          polarity:
+            pieceKind === "COPCUT" || pieceKind === "COPCCO"
+              ? ("negative" as const)
+              : ("positive" as const),
           ...(pinNumber ? { pinNumber } : {}),
           ...(restrictions ? { restrictions } : {}),
           ...(activeTagGroup ? { groupId: activeTagGroup.id } : {}),
@@ -1314,9 +1342,10 @@ const parsePartDecalDefinitions = ({
         const y = parseFiniteNumber(lineTokens[1])
         if (x !== undefined && y !== undefined) {
           currentDefinition.terminals.push({
-            location: { x, y },
+            location: { x, y, source },
             pinNumber:
               lineTokens[4] ?? String(currentDefinition.terminals.length + 1),
+            source,
           })
         }
         lineIndex++
@@ -1343,6 +1372,7 @@ const parsePartDecalDefinitions = ({
         lineIndex < section.lines.length &&
         parsedStackLineCount < normalizedStackLineCount
       ) {
+        const layerSource = section.records[lineIndex]?.provenance
         const stackTokens = tokenizeLine(section.lines[lineIndex] ?? "")
         lineIndex++
         if (stackTokens.length === 0 || stackTokens[0]?.startsWith("*REMARK")) {
@@ -1352,6 +1382,7 @@ const parsePartDecalDefinitions = ({
         const layer = parsePartDecalPadLayer({
           lineTokens: stackTokens,
           usesCornerRadiusFields,
+          source: layerSource,
         })
         if (layer) layers.push(layer)
       }
@@ -1372,11 +1403,6 @@ const parsePartDecalDefinitions = ({
   if (malformedPieceArcCount > 0) {
     diagnostics.push(
       `${malformedPieceArcCount} ASCII part-decal arc records could not be decoded`,
-    )
-  }
-  if (unsupportedCutoutPieceCount > 0) {
-    diagnostics.push(
-      `${unsupportedCutoutPieceCount} ASCII part-decal copper cutout pieces require polarity-aware group rendering`,
     )
   }
   if (allLayerCopperPieceCount > 0) {
@@ -1454,7 +1480,8 @@ const addPartSectionGeometry = ({
   decalNamesByPartType: Map<string, string[]>
   placements: PadsGeometryPlacement[]
 }): void => {
-  for (const lineText of section.lines) {
+  for (let lineIndex = 0; lineIndex < section.lines.length; lineIndex++) {
+    const lineText = section.lines[lineIndex] ?? ""
     const lineTokens = tokenizeLine(lineText)
     const x = parseFiniteNumber(lineTokens[2])
     const y = parseFiniteNumber(lineTokens[3])
@@ -1474,6 +1501,7 @@ const addPartSectionGeometry = ({
     }
 
     placements.push({
+      source: section.records[lineIndex]?.provenance,
       reference: lineTokens[0],
       footprintName: resolvePlacementDecalName({
         partTypeToken: lineTokens[1],
@@ -1756,6 +1784,7 @@ const addPlacedPartPads = ({
           ? 180 - drillLayer.slotOrientation
           : drillLayer.slotOrientation
         holes.push({
+          source: drillLayer.source ?? terminal.source,
           center: transformDecalPoint({
             point: localHoleCenter,
             placement,
@@ -1797,6 +1826,7 @@ const addPlacedPartPads = ({
         y: terminal.location.y + padLayer.offset * Math.sin(padRotationRadians),
       }
       pads.push({
+        source: padLayer.source ?? terminal.source,
         center: transformDecalPoint({
           point: localPadCenter,
           placement,
@@ -2067,7 +2097,12 @@ const parseLayerCount = (
 export const extractAsciiBoardGeometry = (
   document: PadsAsciiDocument,
 ): PadsBoardGeometry => {
-  const sections = collectTopLevelSections(document.getString())
+  if (document.units === "unknown") {
+    throw new RangeError(
+      "Cannot extract geometry with unknown PADS ASCII units",
+    )
+  }
+  const sections = collectTopLevelSections(document)
   const layers = parseLayerInfo(sections)
   const layerCount = parseLayerCount(sections, layers)
   const diagnostics: string[] = []
@@ -2126,21 +2161,26 @@ export const extractAsciiBoardGeometry = (
     circles,
   })
 
-  return {
-    sourceFormat: "ascii",
-    version: document.version,
-    layerCount,
-    layers,
-    paths,
-    circles,
-    texts,
-    placements,
-    pads,
-    holes,
-    unassignedVertices: [],
-    unverifiedConnections: [],
-    unverifiedViaLocations,
-    binarySections: [],
-    diagnostics,
-  }
+  return normalizeGeometryUnits({
+    sourceUnits: document.units,
+    geometry: {
+      sourceFormat: "ascii",
+      version: document.version,
+      sourceUnits: document.units,
+      coordinateUnit: "nanometer",
+      layerCount,
+      layers,
+      paths,
+      circles,
+      texts,
+      placements,
+      pads,
+      holes,
+      unassignedVertices: [],
+      unverifiedConnections: [],
+      unverifiedViaLocations,
+      binarySections: [],
+      diagnostics,
+    },
+  })
 }

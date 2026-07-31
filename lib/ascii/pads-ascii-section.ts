@@ -1,14 +1,21 @@
+import type { PadsAsciiSourceProvenance } from "../source-provenance"
+import type { PadsAsciiRecord } from "./pads-ascii-record"
+
 const KNOWN_SECTION_NAMES = new Set([
   "PCB",
   "REUSE",
   "TEXT",
   "LINES",
+  "VIA",
   "PARTDECAL",
   "PARTTYPE",
   "PART",
-  "SIGNAL",
+  "NET",
+  "ROUTE",
   "POUR",
+  "TESTPOINT",
   "MISC",
+  "LAYER",
   "END",
 ])
 
@@ -16,6 +23,8 @@ export interface PadsAsciiSectionInit {
   name: string
   headerText: string
   bodyText?: string
+  records?: PadsAsciiRecord[]
+  provenance?: PadsAsciiSourceProvenance
 }
 
 export class PadsAsciiSection {
@@ -23,19 +32,53 @@ export class PadsAsciiSection {
   readonly name: string
   readonly headerText: string
   readonly bodyText: string
+  readonly records: PadsAsciiRecord[]
+  readonly provenance?: PadsAsciiSourceProvenance
 
-  constructor({ name, headerText, bodyText = "" }: PadsAsciiSectionInit) {
+  constructor({
+    name,
+    headerText,
+    bodyText = "",
+    records = [],
+    provenance,
+  }: PadsAsciiSectionInit) {
     this.name = name
     this.headerText = headerText
     this.bodyText = bodyText
+    this.records = records
+    this.provenance = provenance
   }
 
-  getChildren(): readonly [] {
-    return []
+  getChildren(): readonly PadsAsciiRecord[] {
+    return this.records
   }
 
   getString(): string {
-    return `${this.headerText}${this.bodyText}`
+    return `${this.headerText}${
+      this.records.length > 0
+        ? this.records.map((record) => record.getString()).join("")
+        : this.bodyText
+    }`
+  }
+
+  withRecords(records: PadsAsciiRecord[]): PadsAsciiSection {
+    return createPadsAsciiSection({
+      name: this.name,
+      headerText: this.headerText,
+      bodyText: "",
+      records,
+      provenance: this.provenance,
+    })
+  }
+
+  withHeaderText(headerText: string): PadsAsciiSection {
+    return createPadsAsciiSection({
+      name: this.name,
+      headerText,
+      bodyText: this.bodyText,
+      records: this.records,
+      provenance: this.provenance,
+    })
   }
 }
 
@@ -55,3 +98,6 @@ export const createPadsAsciiSection = (
 
   return new PadsAsciiUnknownSection(init)
 }
+
+export const isKnownPadsAsciiSectionName = (name: string): boolean =>
+  name.startsWith("PADS-POWERPCB-") || KNOWN_SECTION_NAMES.has(name)

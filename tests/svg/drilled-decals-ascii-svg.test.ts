@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { resolve } from "node:path"
 import {
+  convertPadsCoordinateToNanometers,
   extractPadsBoardGeometry,
   generateSvgFromPads,
   parsePads,
@@ -10,6 +11,8 @@ import { expectGerberStyleSvg } from "./render-downloaded-pads-asset"
 const fixturePath = resolve(import.meta.dir, "../fixtures/drilled-decals.asc")
 const sourceBytes = await Bun.file(fixturePath).bytes()
 const document = parsePads(sourceBytes)
+const mils = (coordinate: number): number =>
+  convertPadsCoordinateToNanometers(coordinate, "MILS")
 
 test("renders round and slotted plated and non-plated component drills", async () => {
   const geometry = extractPadsBoardGeometry(document)
@@ -27,25 +30,25 @@ test("renders round and slotted plated and non-plated component drills", async (
     (hole) => hole.reference === "J1" && hole.pinNumber === "4",
   )
   expect(topSlot).toMatchObject({
-    width: 42,
-    height: 14,
+    width: mils(42),
+    height: mils(14),
     rotation: 30,
     plated: false,
   })
-  expect(topSlot?.center.x).toBeCloseTo(218.66, 2)
-  expect(topSlot?.center.y).toBe(125)
+  expect((topSlot?.center.x ?? 0) / mils(1)).toBeCloseTo(218.66, 2)
+  expect(topSlot?.center.y).toBe(mils(125))
 
   const bottomSlot = geometry.holes.find(
     (hole) => hole.reference === "J2" && hole.pinNumber === "4",
   )
   expect(bottomSlot).toMatchObject({
-    width: 42,
-    height: 14,
+    width: mils(42),
+    height: mils(14),
     rotation: 150,
     plated: false,
   })
-  expect(bottomSlot?.center.x).toBeCloseTo(381.34, 2)
-  expect(bottomSlot?.center.y).toBe(125)
+  expect((bottomSlot?.center.x ?? 0) / mils(1)).toBeCloseTo(381.34, 2)
+  expect(bottomSlot?.center.y).toBe(mils(125))
   expect(geometry.diagnostics).toEqual([])
 
   const views = [

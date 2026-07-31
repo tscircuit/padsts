@@ -31,33 +31,33 @@ The central completion rule is:
 - [x] Preserve opaque native binary sections and trailing bytes.
 - [x] Report parse errors with source offsets.
 - [ ] Add mutation-aware serialization.
-  - [ ] Permit typed ASCII records to be added, edited, and removed.
-  - [ ] Re-emit changed records without normalizing unrelated source text.
+  - [x] Permit typed ASCII records to be added, edited, and removed.
+  - [x] Re-emit changed records without normalizing unrelated source text.
   - [ ] Permit supported binary fields to be edited without losing opaque
     fields or sections.
   - [ ] Recalculate binary directory lengths, record counts, offsets, footer
     size, and checks when a binary document changes.
   - [ ] Add parse → edit → serialize → parse tests for every mutable entity.
 - [ ] Add a shared source-provenance model.
-  - [ ] Give every decoded ASCII record a section, line, and byte span.
-  - [ ] Give every decoded binary record a section, record index, and byte
+  - [x] Give every decoded ASCII record a section, line, and byte span.
+  - [x] Give every decoded binary record a section, record index, and byte
     range.
-  - [ ] Preserve stable source IDs through normalized geometry and conversion.
+  - [x] Preserve stable source IDs through normalized geometry and conversion.
   - [ ] Include source provenance in all warnings and conversion diagnostics.
 
 ### Units and coordinates
 
-- [x] Read `BASIC`, `MILS`, and `METRIC` from an ASCII file header.
+- [x] Read `BASIC`, `MILS`, `INCHES`, and `METRIC` from an ASCII file header.
 - [x] Read a candidate binary origin from setup section 1.
 - [x] Read a candidate binary layer count from setup section 1.
-- [ ] Define one explicit internal coordinate unit.
+- [x] Define one explicit internal coordinate unit.
 - [ ] Verify the scale and sign of every binary coordinate version by version.
-- [ ] Convert `BASIC`, `MILS`, and `METRIC` ASCII coordinates without relying on
-  renderer-specific assumptions.
+- [x] Convert `BASIC`, `MILS`, `INCHES`, and `METRIC` ASCII coordinates without
+  relying on renderer-specific assumptions.
 - [ ] Model file origin, board origin, and local decal origins separately.
-- [ ] Define and test top-view/bottom-view rotation and mirroring conventions.
-- [ ] Reject or diagnose non-finite, implausible, or overflowed coordinates.
-- [ ] Add coordinate round-trip tests with negative values, large values, and
+- [x] Define and test top-view/bottom-view rotation and mirroring conventions.
+- [x] Reject or diagnose non-finite, implausible, or overflowed coordinates.
+- [x] Add coordinate round-trip tests with negative values, large values, and
   each supported unit system.
 
 ### Structured diagnostics and coverage
@@ -66,16 +66,16 @@ The central completion rule is:
 - [x] Attach geometry-decoder notes to SVG metadata.
 - [ ] Replace free-form geometry diagnostic strings with typed diagnostic
   objects.
-  - [ ] Define stable diagnostic codes and severities.
+  - [x] Define stable diagnostic codes and severities.
   - [ ] Include source provenance and affected entity IDs.
-  - [ ] Distinguish unsupported, malformed, approximate, and inferred data.
-  - [ ] Make diagnostics serializable as JSON.
+  - [x] Distinguish unsupported, malformed, approximate, and inferred data.
+  - [x] Make diagnostics serializable as JSON.
 - [ ] Track semantic decode coverage.
   - [ ] Count decoded, partially decoded, skipped, and malformed ASCII records.
   - [ ] Count decoded, partially decoded, and opaque binary records by section.
   - [ ] Account for every byte in every binary record.
-  - [ ] Fail strict conversion when unreported source data would be dropped.
-  - [ ] Include coverage totals in the inspection CLI and conversion report.
+  - [x] Fail strict conversion when unreported source data would be dropped.
+  - [x] Include coverage totals in the inspection CLI and conversion report.
 
 ## P0: PADS ASCII semantic parser
 
@@ -85,28 +85,32 @@ with a typed ASCII AST.
 
 ### Section hierarchy and tokenization
 
-- [ ] Distinguish true top-level sections from nested markers such as
+- [x] Distinguish true top-level sections from nested markers such as
   `*SIGNAL*` and `*REMARK*`.
-- [ ] Add all known top-level names to the typed section registry, including
+- [x] Add all known top-level names to the typed section registry, including
   `ROUTE`, `VIA`, `NET`, `LAYER`, and `TESTPOINT`.
-- [ ] Preserve unknown top-level and nested records without accidentally
+- [x] Preserve unknown top-level and nested records without accidentally
   splitting their parent sections.
 - [ ] Implement quoted strings, embedded spaces, escaped text, blank fields,
   continuation records, comments, and version-specific field counts.
-- [ ] Give each parsed line a typed record kind or an explicit unknown-record
+- [x] Give each parsed line a typed record kind or an explicit unknown-record
   node.
-- [ ] Validate required section ordering and the `*END*` terminator without
+- [x] Validate required section ordering and the `*END*` terminator without
   preventing lossless inspection of malformed files.
 - [ ] Add focused fixtures for each header form and nested marker.
 
 ### Board setup and layers
 
 - [ ] Parse `PCB` setup records into typed fields.
-  - [ ] Units and coordinate precision.
+  - [x] Units and coordinate precision.
   - [ ] Origin and extents.
-  - [ ] Maximum layer count.
+    - [x] Origin.
+    - [ ] Extents.
+  - [x] Maximum layer count.
   - [ ] Default trace, via, clearance, and grid settings.
-  - [ ] Any version or application metadata.
+    - [x] Default trace width, via grid, and user grid when present.
+    - [ ] Complete clearance and rule defaults.
+  - [x] Preserve all settings and expose basic job metadata.
 - [ ] Parse `LAYER` records.
   - [x] Layer number, name, type, electrical role, and side from both the
     simple `LAYER` section and nested `MISC` `LAYER DATA`.
@@ -124,13 +128,13 @@ with a typed ASCII AST.
 - [x] Extract basic free-text position, rotation, layer, height, stroke width,
   and mirror flag.
 - [ ] Parse every line-piece kind into typed geometry.
-  - [ ] Open and closed polylines.
-  - [ ] Circles.
+  - [x] Open and closed polylines.
+  - [x] Circles.
   - [x] Arc-annotated `LINES` vertices with exact center, radius, direction, and
     sweep.
   - [ ] Curves or other version-specific primitives.
   - [ ] Board cutouts and nested contours.
-  - [ ] Copper and keepout contours.
+  - [x] Copper and keepout contours.
 - [x] Stop rendering arc-annotated `LINES` vertices as straight segments.
 - [ ] Decode line styles, widths, restrictions, ownership, and layer semantics.
 - [ ] Parse text alignment, font, justification, visibility, ownership, and
@@ -200,11 +204,12 @@ with a typed ASCII AST.
       pin association and layer routing.
     - [x] Decode `KPTCLS` and `KPTCIR` keepouts with restriction codes.
     - [x] Preserve nested `TAG` group membership and inherited pin association.
-    - [ ] Decode polarity-aware `COPCUT`/`COPCCO` cutouts and other piece kinds.
+    - [x] Decode polarity-aware `COPCUT`/`COPCCO` cutouts and other piece kinds.
   - [ ] Reference/value text templates.
   - [ ] Copper, keepout, and placement-outline primitives.
     - [x] Positive copper and keepout primitives.
-    - [ ] Compound copper cutouts and placement outlines.
+    - [x] Compound copper cutouts.
+    - [ ] Placement outlines.
 - [ ] Parse `PARTTYPE` definitions.
   - [ ] Part type name and decal alternatives.
     - [x] Resolve colon-separated decal alternatives and zero-based `PART ALT`
@@ -226,7 +231,8 @@ with a typed ASCII AST.
   - [x] Render basic decal drawing pieces on normalized silkscreen,
     fabrication, and drawing layers.
   - [x] Render positive decal copper and keepout pieces.
-  - [ ] Render decal text, compound copper cutouts, and remaining unsupported
+  - [x] Render compound copper cutouts.
+  - [ ] Render decal text and remaining unsupported
     pad shapes.
 
 ### Nets, routes, and test points
@@ -280,22 +286,22 @@ partial and based on a small number of observed record offsets.
 - [x] Preserve directory entry bytes, sections, trailing bytes, and footer.
 - [ ] Document every known header and directory-entry field.
 - [ ] Validate record count and byte length combinations.
-  - [ ] Diagnose non-integral record sizes where fixed-size records are
+  - [x] Diagnose non-integral record sizes where fixed-size records are
     expected.
-  - [ ] Guard every offset and multiplication against unsafe integer overflow.
+  - [x] Guard every offset and multiplication against unsafe integer overflow.
   - [ ] Detect impossible empty/non-empty count and length combinations.
 - [ ] Add an opt-in opaque-container mode for unknown future versions.
-- [ ] Build a versioned section registry rather than scattering numeric section
+- [x] Build a versioned section registry rather than scattering numeric section
   IDs and offsets through geometry code.
-- [ ] Document a section map for every supported version with confidence levels
+- [x] Document a section map for every supported version with confidence levels
   and fixture evidence.
 
 ### Shared binary decoding infrastructure
 
-- [ ] Promote `BinarySectionReader` into a tested reusable module.
-- [ ] Add checked reads for signed/unsigned 8-, 16-, 32-, and 64-bit values,
+- [x] Promote `BinarySectionReader` into a tested reusable module.
+- [x] Add checked reads for signed/unsigned 8-, 16-, 32-, and 64-bit values,
   floats if present, flags, fixed strings, and string references.
-- [ ] Return structured field-level errors instead of silently returning
+- [x] Return structured field-level errors instead of silently returning
   `undefined`.
 - [ ] Define version-specific record layouts declaratively.
 - [ ] Validate reference indices before resolving them.
@@ -414,8 +420,8 @@ partial and based on a small number of observed record offsets.
 - [ ] Identify and decode test-point records.
 - [ ] Identify and decode reuse-block records.
 - [ ] Identify and decode design rules and constraints.
-- [ ] Inventory every non-empty section in every fixture.
-- [ ] Require each non-empty section to have a decoder, an opaque typed wrapper,
+- [x] Inventory every non-empty section in every fixture.
+- [x] Require each non-empty section to have a decoder, an opaque typed wrapper,
   or an explicit unsupported-section diagnostic.
 
 ## P1: normalized board model
@@ -466,7 +472,8 @@ partial and based on a small number of observed record offsets.
   - [x] Render round drills, slotted drills, and rounded/chamfered copper pads.
   - [x] Render straight, circular, and exact-arc decal graphics.
   - [x] Render positive decal copper and keepout pieces.
-  - [ ] Render compound decal copper cutouts and decal text.
+  - [x] Render compound decal copper cutouts.
+  - [ ] Render decal text.
 - [ ] Render verified pad-stack shapes and drill geometry.
   - [x] Render resolved ASCII round and square via apertures with exact drill
     radii and layer-span metadata.
@@ -502,7 +509,7 @@ partial and based on a small number of observed record offsets.
   - [x] Full copper overlay.
   - [x] Debug/coverage view.
   - [x] Arbitrary board-coordinate detail windows for close-up inspection.
-- [ ] Use stable, source-linked element IDs and `data-*` attributes.
+- [x] Use stable, source-linked element IDs and `data-*` attributes.
 - [ ] Add semantic assertions alongside image snapshots.
   - [x] Expected layer names and normalized silkscreen/assembly roles for the
     focused decal fixture and real ASCII references.
@@ -532,26 +539,30 @@ partial and based on a small number of observed record offsets.
 
 ### Inspection
 
-- [ ] Add a public structured inspection API.
-- [ ] Add a `padsts inspect <file>` CLI command.
-  - [ ] Format, version, units, origin, and layer stack.
-  - [ ] Section and record summary.
-  - [ ] Entity counts.
-  - [ ] Decode coverage.
-  - [ ] Diagnostics with source locations.
-  - [ ] JSON output mode.
-- [ ] Add a `padsts validate <file>` command with meaningful exit codes.
-- [ ] Add a `padsts to-svg <file>` command with layer and debug options.
+- [x] Add a public structured inspection API.
+- [x] Add a `padsts inspect <file>` CLI command.
+  - [x] Format, version, units, and decoded layer stack.
+  - [x] Section and record summary.
+  - [x] Entity counts.
+  - [x] Decode coverage.
+  - [x] Diagnostics with source locations when available.
+  - [x] JSON output mode.
+- [x] Add a `padsts validate <file>` command with meaningful exit codes.
+- [x] Add a `padsts to-svg <file>` command with layer and debug options.
 
 ### Circuit JSON
 
-- [ ] Implement `toCircuitJson(document)`.
+- [x] Implement experimental `toCircuitJson(document)`.
 - [ ] Map board outline and cutouts.
+  - [x] Map exact line-only board outlines.
+  - [ ] Map board cutouts.
 - [ ] Map layer stack.
 - [ ] Map components, footprints, pads, holes, and text.
+  - [x] Map placed components with decoded extents, pads, and holes.
+  - [ ] Map reusable footprints and text.
 - [ ] Map nets, ports/pins, traces, vias, and connectivity.
 - [ ] Map pours, keepouts, and supported rule data.
-- [ ] Preserve PADS source IDs in Circuit JSON metadata.
+- [x] Preserve PADS source IDs in stable Circuit JSON entity IDs.
 - [ ] Emit warnings for every approximation or skipped entity.
 - [ ] Validate generated Circuit JSON against the current schema.
 - [ ] Render generated Circuit JSON and compare it with the PADS SVG.
@@ -570,11 +581,11 @@ partial and based on a small number of observed record offsets.
 
 ### Conversion reports
 
-- [ ] Define a machine-readable conversion report schema.
+- [x] Define a machine-readable conversion report schema.
 - [ ] List every skipped, approximate, inferred, or unsupported source entity.
-- [ ] Include source provenance, diagnostic severity, and output entity IDs.
-- [ ] Include per-section/record/byte decode coverage.
-- [ ] Support a strict mode that refuses lossy conversion.
+- [x] Include source provenance, diagnostic severity, and affected entity IDs.
+- [x] Include per-section/record/byte decode coverage.
+- [x] Support a strict mode that refuses lossy conversion.
 
 ## P1: fixtures and verification
 
@@ -592,11 +603,11 @@ partial and based on a small number of observed record offsets.
 - [x] Require each new geometry-decoder increment to add or update focused
   close-up snapshots that expose the affected features at inspectable scale.
 - [ ] Add a typed expected-results manifest for every fixture.
-  - [ ] Units and layer count.
-  - [ ] Board extents.
-  - [ ] Component, pad, net, trace, via, text, outline, and pour counts.
+  - [x] Units and layer count.
+  - [x] Board/debug extents when decoded.
+  - [x] Component, pad, net, trace, via, text, outline, and decoded-pour counts.
   - [ ] Representative named entities and coordinates.
-  - [ ] Expected diagnostics and decode coverage.
+  - [x] Expected diagnostics and decode coverage.
 - [ ] Add small synthetic ASCII fixtures for every record type and edge case.
   - [x] Cover top/interior/bottom via pads, partial spans, and explicit
     layer-specific pad overrides with per-layer SVG snapshots.
@@ -612,8 +623,11 @@ partial and based on a small number of observed record offsets.
 - [ ] Add minimal synthetic binary fixtures for every versioned record layout.
 - [ ] Add malformed-record tests inside sections, not only malformed container
   tests.
-- [ ] Add property and fuzz tests for both format detectors and parsers.
+- [x] Add property and deterministic mutation-fuzz tests for both format
+  detectors and parsers.
 - [ ] Add memory and runtime limits for large or hostile files.
+  - [x] Add an application-controlled input-byte allocation limit.
+  - [ ] Add cancellable runtime budgets for semantic decoding and rendering.
 - [ ] Verify behavior on macOS, Linux, and Windows.
 - [ ] Obtain the RK3326 target legitimately and add its local expected-results
   manifest.
@@ -638,42 +652,44 @@ partial and based on a small number of observed record offsets.
 - [x] Document the GPL interoperability boundary.
 - [x] Record the currently known native container structure.
 - [x] Document fixture sources, licenses, and manual RK3326 placement.
-- [ ] Publish the versioned native section map and field observations.
-- [ ] Document every public AST and normalized-model type.
-- [ ] Document supported and unsupported PADS features in a compatibility
+- [x] Publish the versioned native section map and field observations.
+- [x] Document the public AST, normalized-model, inspection, and conversion API
+  stability boundaries.
+- [x] Document supported and unsupported PADS features in a compatibility
   matrix.
-- [ ] Add end-to-end examples for inspect, SVG, Circuit JSON, and strict
+- [x] Add end-to-end examples for inspect, SVG, Circuit JSON, and strict
   conversion.
-- [ ] Add a reverse-engineering contribution guide.
-  - [ ] Evidence requirements for assigning field meaning.
-  - [ ] Fixture and licensing requirements.
-  - [ ] Rules against copying GPL implementation code.
-  - [ ] How to record confidence and version differences.
-- [ ] Add a security policy for malformed/untrusted PCB files.
+- [x] Add a reverse-engineering contribution guide.
+  - [x] Evidence requirements for assigning field meaning.
+  - [x] Fixture and licensing requirements.
+  - [x] Rules against copying GPL implementation code.
+  - [x] How to record confidence and version differences.
+- [x] Add a security policy for malformed/untrusted PCB files.
 
 ### Continuous integration
 
 - [x] Install dependencies and download verified fixtures in GitHub Actions.
 - [x] Run the Bun test suite in GitHub Actions.
-- [ ] Run `bun run check` in CI so formatting, typechecking, tests, and build are
+- [x] Run `bun run check` in CI so formatting, typechecking, tests, and build are
   all required.
-- [ ] Use a pinned Bun version instead of `latest`.
-- [ ] Add a frozen-lockfile install check.
-- [ ] Upload SVG diff images when visual tests fail.
-- [ ] Add a fixture-download cache that never bypasses hash verification.
-- [ ] Add a cross-platform or at least Linux/macOS matrix for SVG dependencies.
-- [ ] Add package tarball validation with `npm pack`.
+- [x] Use a pinned Bun version instead of `latest`.
+- [x] Add a frozen-lockfile install check.
+- [x] Upload SVG diff images when visual tests fail.
+- [x] Add a fixture-download cache that never bypasses hash verification.
+- [x] Add a cross-platform Linux/macOS matrix for SVG dependencies.
+- [x] Add package tarball validation with `npm pack`.
 
 ### Package release
 
 - [x] Export parser, geometry, and SVG APIs from the package entry point.
 - [x] Generate ESM output and TypeScript declarations.
-- [ ] Define the stability boundary between experimental decoders and supported
+- [x] Define the stability boundary between experimental decoders and supported
   public APIs.
-- [ ] Add API-level tests against the built package.
-- [ ] Add changelog and release notes.
-- [ ] Add semantic-versioning and npm publication workflow.
-- [ ] Verify package contents, license, provenance, and reproducible install
+- [x] Add API-level tests against the built package.
+- [x] Add changelog and release notes.
+- [x] Add semantic-versioning guidance and an npm provenance publication
+  workflow.
+- [x] Verify package contents, license, provenance, and reproducible install
   before the first release.
 
 ## Completion gates

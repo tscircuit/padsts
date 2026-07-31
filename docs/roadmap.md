@@ -11,11 +11,11 @@ reports without weakening round-trip behavior.
 - Parse native binary headers and section directories with bounds checks.
 - Preserve unknown ASCII records and binary sections exactly.
 
-## Milestone 2: board setup
+## Milestone 2: board setup and inspection
 
 - Decode units, origin, layer count, and layer names.
 - Decode the binary string pool.
-- Add a human-readable inspection CLI.
+- Add human-readable and JSON inspection, validation, and strict reports.
 
 ## Milestone 3: library and placement
 
@@ -38,11 +38,11 @@ reports without weakening round-trip behavior.
 
 ## Milestone 6: conversion adapters
 
-- Add `toCircuitJson(document)` after the AST is stable enough to describe the
-  supported board features without lossy shortcuts.
+- Extend the experimental `toCircuitJson(document)` exact subset as semantic
+  coverage becomes conversion-grade.
 - Optionally add a KiCad adapter through `kicadts`.
 - Emit a conversion report listing every skipped or approximate source record.
 
-The first real native `.pcb` fixture should be added only when its redistribution
-license permits it. Until then, tests should use minimal synthetic containers
-and user-provided files locally.
+The RK3326 target must only be added when its redistribution license permits it.
+Until then, it remains a local gitignored target and cannot be a public release
+gate.

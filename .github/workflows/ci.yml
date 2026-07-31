@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Bun ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.2
+      - name: Restore verified fixture cache
+        uses: actions/cache@v4
+        with:
+          path: tests/assets/downloaded
+          key: pads-fixtures-${{ runner.os }}-${{ hashFiles('scripts/download-test-assets.ts') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run test:download-assets
+      - run: bun run check
+      - name: Upload SVG visual diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: svg-diffs-${{ runner.os }}
+          path: |
+            tests/**/*.diff.png
+            tests/**/*.received.svg
+          if-no-files-found: ignore
+
+  package:
+    name: Package tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.2
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run test:package
+      - run: bun run package:check

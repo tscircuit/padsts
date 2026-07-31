@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { resolve } from "node:path"
 import {
+  convertPadsCoordinateToNanometers,
   extractPadsBoardGeometry,
   generateSvgFromPads,
   parsePads,
@@ -10,6 +11,8 @@ import { expectGerberStyleSvg } from "./render-downloaded-pads-asset"
 const fixturePath = resolve(import.meta.dir, "../fixtures/layered-vias.asc")
 const sourceBytes = await Bun.file(fixturePath).bytes()
 const document = parsePads(sourceBytes)
+const mils = (coordinate: number): number =>
+  convertPadsCoordinateToNanometers(coordinate, "MILS")
 
 test("renders distinct top, inner, bottom, and specific-layer via pads", async () => {
   const geometry = extractPadsBoardGeometry(document)
@@ -17,20 +20,20 @@ test("renders distinct top, inner, bottom, and specific-layer via pads", async (
 
   expect(vias).toHaveLength(3)
   expect(vias[0]?.copperPads).toEqual([
-    { layer: 1, radius: 25, shape: "circle" },
-    { layer: 2, radius: 40, shape: "circle" },
-    { layer: 3, radius: 40, shape: "circle" },
-    { layer: 4, radius: 30, shape: "square" },
+    { layer: 1, radius: mils(25), shape: "circle" },
+    { layer: 2, radius: mils(40), shape: "circle" },
+    { layer: 3, radius: mils(40), shape: "circle" },
+    { layer: 4, radius: mils(30), shape: "square" },
   ])
   expect(vias[1]?.copperPads).toEqual([
-    { layer: 2, radius: 17.5, shape: "square" },
-    { layer: 3, radius: 12.5, shape: "circle" },
+    { layer: 2, radius: mils(17.5), shape: "square" },
+    { layer: 3, radius: mils(12.5), shape: "circle" },
   ])
   expect(vias[2]?.copperPads).toEqual([
-    { layer: 1, radius: 22.5, shape: "circle" },
-    { layer: 2, radius: 37.5, shape: "square" },
-    { layer: 3, radius: 27.5, shape: "circle" },
-    { layer: 4, radius: 22.5, shape: "circle" },
+    { layer: 1, radius: mils(22.5), shape: "circle" },
+    { layer: 2, radius: mils(37.5), shape: "square" },
+    { layer: 3, radius: mils(27.5), shape: "circle" },
+    { layer: 4, radius: mils(22.5), shape: "circle" },
   ])
   expect(geometry.diagnostics).toEqual([])
 

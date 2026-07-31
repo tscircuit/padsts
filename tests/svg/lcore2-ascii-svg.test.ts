@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { convertPadsCoordinateToNanometers } from "../../lib"
 import {
   expectBoardZoomSnapshotViews,
   expectGerberStyleSvg,
@@ -11,6 +12,8 @@ import {
 
 const asset = getSvgTestAsset("kicad-lcore2-ascii")
 const isAvailable = await isSvgTestAssetAvailable(asset)
+const basic = (coordinate: number): number =>
+  convertPadsCoordinateToNanometers(coordinate, "BASIC")
 
 test.skipIf(!isAvailable)("renders the LCORE 2 ASCII board", async () => {
   const geometry = await extractDownloadedPadsAssetGeometry(asset)
@@ -19,8 +22,8 @@ test.skipIf(!isAvailable)("renders the LCORE 2 ASCII board", async () => {
   const decalCircles = geometry.circles.filter((circle) => circle.reference)
   const svg = await renderDownloadedPadsAsset(asset)
   expect(vias).toHaveLength(24)
-  expect(vias.every((via) => via.radius === 300_000)).toBe(true)
-  expect(vias.every((via) => via.drillRadius === 150_000)).toBe(true)
+  expect(vias.every((via) => via.radius === basic(300_000))).toBe(true)
+  expect(vias.every((via) => via.drillRadius === basic(150_000))).toBe(true)
   expect(vias.every((via) => via.copperPads?.length === 2)).toBe(true)
   expect(vias.flatMap((via) => via.copperPads ?? [])).toHaveLength(48)
   expect(geometry.pads).toHaveLength(69)

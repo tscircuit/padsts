@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { convertPadsCoordinateToNanometers } from "../../lib"
 import {
   expectBoardZoomSnapshotViews,
   expectGerberStyleSvg,
@@ -11,6 +12,8 @@ import {
 
 const asset = getSvgTestAsset("kicad-ems4-rev2-ascii")
 const isAvailable = await isSvgTestAssetAvailable(asset)
+const basic = (coordinate: number): number =>
+  convertPadsCoordinateToNanometers(coordinate, "BASIC")
 
 test.skipIf(!isAvailable)(
   "renders the EMS4 ASCII reference board",
@@ -67,14 +70,14 @@ test.skipIf(!isAvailable)(
       polarity: "positive",
     })
     expect(l5Pin1Copper?.points[0]).toEqual({
-      x: 7_836_000,
-      y: 14_650_500,
+      x: basic(7_836_000),
+      y: basic(14_650_500),
     })
     expect(
       l5Pin1Copper?.segments?.find((segment) => segment.kind === "arc"),
     ).toMatchObject({
-      center: { x: 11_811_000, y: 13_525_500 },
-      radius: 2_784_107,
+      center: { x: basic(11_811_000), y: basic(13_525_500) },
+      radius: basic(2_784_107),
       deltaAngle: 125.5,
     })
     expect(l6Pin1Copper).toMatchObject({
@@ -82,14 +85,14 @@ test.skipIf(!isAvailable)(
       polarity: "positive",
     })
     expect(l6Pin1Copper?.points[0]).toEqual({
-      x: 10_312_500,
-      y: 7_638_000,
+      x: basic(10_312_500),
+      y: basic(7_638_000),
     })
     expect(
       l6Pin1Copper?.segments?.find((segment) => segment.kind === "arc"),
     ).toMatchObject({
-      center: { x: 14_287_500, y: 8_763_000 },
-      radius: 2_784_107,
+      center: { x: basic(14_287_500), y: basic(8_763_000) },
+      radius: basic(2_784_107),
       deltaAngle: -125.5,
     })
     expect(geometry.diagnostics).toEqual([
@@ -189,4 +192,5 @@ test.skipIf(!isAvailable)(
       ],
     })
   },
+  15_000,
 )

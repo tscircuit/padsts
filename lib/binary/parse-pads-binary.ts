@@ -1,4 +1,5 @@
 import { PadsParseError } from "../parse-error"
+import { getPadsBinarySectionDefinition } from "./binary-section-registry"
 import {
   PADS_BINARY_DIRECTORY_ENTRY_SIZE,
   PADS_BINARY_FOOTER_SIZE,
@@ -120,6 +121,7 @@ export const parsePadsBinary = (
   })
   const directoryEntries: PadsBinaryDirectoryEntry[] = []
   const sections: PadsBinarySection[] = []
+  const diagnostics: PadsBinaryDiagnostic[] = []
   let sectionOffset = directoryEndOffset
 
   for (let index = 0; index < directoryEntryCount; index++) {
@@ -139,6 +141,18 @@ export const parsePadsBinary = (
       sectionOffset: entrySectionOffset,
     })
     directoryEntries.push(directoryEntry)
+
+    const sectionDefinition = getPadsBinarySectionDefinition(version, index)
+    if (
+      sectionDefinition.fixedRecordSize !== undefined &&
+      byteLength !== recordCount * sectionDefinition.fixedRecordSize
+    ) {
+      diagnostics.push({
+        code: "fixed-record-size-mismatch",
+        message: `PADS binary section ${index} declares ${recordCount} records and ${byteLength} bytes; expected ${recordCount * sectionDefinition.fixedRecordSize} bytes`,
+        offset: entryOffset,
+      })
+    }
 
     if (index === 0) {
       sections.push(
@@ -170,8 +184,6 @@ export const parsePadsBinary = (
   const footerBytes = sourceBytes.slice(footerStartOffset)
   const guidText = new TextDecoder().decode(footerBytes.slice(4, 42))
   const storedFileBodySize = readUint32LittleEndian(footerBytes, 42)
-  const diagnostics: PadsBinaryDiagnostic[] = []
-
   if (guidText !== EXPECTED_FOOTER_GUID) {
     diagnostics.push({
       code: "footer-guid-mismatch",

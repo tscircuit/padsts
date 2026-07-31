@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test"
-import { detectPadsFormat, parsePads } from "../lib"
+import {
+  detectPadsFormat,
+  extractPadsBoardGeometry,
+  inspectPads,
+  parsePads,
+} from "../lib"
 import {
   calculateGitBlobSha,
   downloadableTestAssets,
   getDownloadedTestAssetPath,
   manualTestAssets,
 } from "../scripts/test-assets"
+import { expectedResultsByAssetId } from "./assets/expected-results"
 
 const downloadableAssetAvailability = await Promise.all(
   downloadableTestAssets.map(async (asset) => ({
@@ -35,6 +41,55 @@ describe("downloaded PADS fixtures", () => {
 
         const document = parsePads(sourceBytes)
         expect(document.kind).toBe(asset.format)
+
+        const expected = expectedResultsByAssetId[asset.id]
+        expect(expected).toBeDefined()
+        if (expected) {
+          const geometry = extractPadsBoardGeometry(document)
+          const inspection = inspectPads(document)
+          const actualBounds = inspection.bounds
+            ? [
+                inspection.bounds.minimumX,
+                inspection.bounds.minimumY,
+                inspection.bounds.maximumX,
+                inspection.bounds.maximumY,
+              ]
+            : undefined
+          expect({
+            units: geometry.sourceUnits,
+            layerCount: geometry.layerCount,
+            ...(actualBounds ? { bounds: actualBounds } : {}),
+            counts: {
+              components: geometry.placements.length,
+              pads: geometry.pads.length,
+              holes: geometry.holes.length,
+              nets: new Set(
+                geometry.paths
+                  .map(({ netName }) => netName)
+                  .filter((netName): netName is string => Boolean(netName)),
+              ).size,
+              traces: geometry.paths.filter(({ kind }) => kind === "route")
+                .length,
+              vias: geometry.circles.filter(({ kind }) => kind === "via")
+                .length,
+              texts: geometry.texts.length,
+              outlines: geometry.paths.filter(({ kind }) => kind === "outline")
+                .length,
+              pours: 0,
+            },
+            diagnosticCount: inspection.diagnostics.length,
+            coverage: {
+              sourceRecords: inspection.coverage.sourceRecordCount,
+              partiallyDecodedRecords:
+                inspection.coverage.partiallyDecodedSourceRecords,
+              skippedRecords: inspection.coverage.skippedSourceRecords,
+              binaryBytes: inspection.coverage.binaryByteLength,
+              partiallyDecodedBytes:
+                inspection.coverage.partiallyDecodedBinaryBytes,
+              opaqueBytes: inspection.coverage.opaqueBinaryBytes,
+            },
+          }).toEqual(expected)
+        }
 
         if (asset.format === "binary" && document.kind === "binary") {
           expect(document.version).toBe(asset.expectedVersion)

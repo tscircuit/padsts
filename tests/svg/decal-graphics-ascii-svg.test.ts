@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { resolve } from "node:path"
 import {
+  convertPadsCoordinateToNanometers,
   extractPadsBoardGeometry,
   generateSvgFromPads,
   parsePads,
@@ -10,6 +11,8 @@ import { expectGerberStyleSvg } from "./render-downloaded-pads-asset"
 const fixturePath = resolve(import.meta.dir, "../fixtures/decal-graphics.asc")
 const sourceBytes = await Bun.file(fixturePath).bytes()
 const document = parsePads(sourceBytes)
+const mils = (coordinate: number): number =>
+  convertPadsCoordinateToNanometers(coordinate, "MILS")
 
 test("renders transformed part-decal graphics on physical board layers", async () => {
   const geometry = extractPadsBoardGeometry(document)
@@ -125,10 +128,10 @@ test("renders transformed part-decal graphics on physical board layers", async (
     segments: [
       {
         kind: "arc",
-        start: { x: 110, y: 150 },
-        end: { x: 190, y: 150 },
-        center: { x: 150, y: 150 },
-        radius: 40,
+        start: { x: mils(110), y: mils(150) },
+        end: { x: mils(190), y: mils(150) },
+        center: { x: mils(150), y: mils(150) },
+        radius: mils(40),
         startAngle: 180,
         deltaAngle: -180,
       },
@@ -144,10 +147,10 @@ test("renders transformed part-decal graphics on physical board layers", async (
     segments: [
       {
         kind: "arc",
-        start: { x: 450, y: 190 },
-        end: { x: 450, y: 110 },
-        center: { x: 450, y: 150 },
-        radius: 40,
+        start: { x: mils(450), y: mils(190) },
+        end: { x: mils(450), y: mils(110) },
+        center: { x: mils(450), y: mils(150) },
+        radius: mils(40),
         startAngle: 90,
         deltaAngle: 180,
       },
@@ -200,7 +203,12 @@ test("renders transformed part-decal graphics on physical board layers", async (
   for (const view of views) {
     const svg = generateSvgFromPads(document, {
       width: 1000,
-      viewBox: { x: 75, y: 70, width: 450, height: 160 },
+      viewBox: {
+        x: mils(75),
+        y: mils(70),
+        width: mils(450),
+        height: mils(160),
+      },
       visibleGerberLayers: view.layers,
       showPlacements: false,
       showText: false,
