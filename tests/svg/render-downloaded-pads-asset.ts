@@ -72,6 +72,14 @@ const visualSnapshotViews: {
     },
   },
   {
+    name: "drill",
+    options: {
+      visibleGerberLayers: ["Drill", "Edge_Cuts"],
+      showPlacements: false,
+      showText: false,
+    },
+  },
+  {
     name: "structure",
     options: {
       visibleGerberLayers: [

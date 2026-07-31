@@ -373,4 +373,40 @@ describe("PADS ASCII", () => {
     expect(svg).toContain('id="pads-F_Cu-component-pads"')
     expect(svg).toContain('id="pads-B_Cu-component-pads"')
   })
+
+  test("decodes pre-corner-radius part-decal drills", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V2007.0-MILS! DESIGN DATABASE ASCII FILE 1.0",
+      "*PCB*",
+      "MAXIMUMLAYER 2",
+      "*PARTDECAL*",
+      "OLD_DRILL I 0 0 0 2 2 0 0",
+      "T-10 0 -10 0 1",
+      "T10 0 10 0 2",
+      "PAD 1 3",
+      "-2 24 S 12 P",
+      "-1 24 R",
+      "0 24 S",
+      "PAD 2 3",
+      "-2 18 RF 30 42 6 10 N",
+      "-1 18 R",
+      "0 18 RF 30 42 6",
+      "*PARTTYPE*",
+      "OLD_TYPE OLD_DRILL I UND 0 0 0 0 Y",
+      "*PART*",
+      "J1 OLD_TYPE 100 200 0 U N 0 -1 0 -1 0",
+      "*END*",
+      "",
+    ].join("\n")
+    const geometry = extractPadsBoardGeometry(parsePadsAscii(sourceText))
+
+    expect(geometry.pads).toHaveLength(2)
+    expect(geometry.pads.every((pad) => pad.cornerRadius === undefined)).toBe(
+      true,
+    )
+    expect(geometry.holes).toHaveLength(2)
+    expect(geometry.holes.map((hole) => hole.width)).toEqual([12, 10])
+    expect(geometry.holes.map((hole) => hole.plated)).toEqual([true, false])
+    expect(geometry.diagnostics).toEqual([])
+  })
 })

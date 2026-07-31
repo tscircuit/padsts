@@ -61,8 +61,11 @@ layer palette as tscircuit's Gerber snapshots. Resolved ASCII vias preserve
 distinct top, inner, bottom, and specific-layer round or square pad apertures,
 including partial layer spans. Basic ASCII part-decal terminals and round,
 square, rectangular-finger, and oval-finger surface pads are resolved through
-part types and transformed onto top or bottom copper. Experimental native-binary
-route and via candidates are withheld from fabrication layers.
+part types and transformed onto top or bottom copper. Mounted-side round and
+slotted drills preserve plating, slot orientation and offset, and render in an
+Excellon-style `Drill` group independently of offset copper fingers. Rounded
+and chamfered square/rectangular pads are also preserved. Experimental
+native-binary route and via candidates are withheld from fabrication layers.
 
 Parser diagnostics and decoded counts are retained in SVG metadata. Optional
 binary section and unresolved-vertex overlays can be enabled explicitly:
@@ -81,8 +84,8 @@ const debugSvg = generateSvgFromPads(sourceBytes, {
 })
 ```
 
-`visibleGerberLayers` can also produce a single-layer or copper-only inspection
-view without changing the parsed geometry.
+`visibleGerberLayers` can also produce single-layer, copper-only, or drill-only
+inspection views without changing the parsed geometry.
 
 ## Why lossless parsing comes first
 

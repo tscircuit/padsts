@@ -3,6 +3,7 @@ import {
   type PadsBinarySectionSummary,
   type PadsBoardGeometry,
   type PadsGeometryCircle,
+  type PadsGeometryHole,
   type PadsGeometryPad,
   type PadsGeometryPath,
   type PadsGeometryPathSegment,
@@ -220,6 +221,21 @@ const getPreferredBoundPoints = (
       {
         x: pad.center.x + halfExtent,
         y: pad.center.y + halfExtent,
+      },
+    )
+  }
+  for (const hole of geometry.holes) {
+    if (!isFinitePoint(hole.center)) continue
+    const halfExtent = Math.hypot(hole.width, hole.height) / 2
+    if (!Number.isFinite(halfExtent) || halfExtent <= 0) continue
+    physicalPoints.push(
+      {
+        x: hole.center.x - halfExtent,
+        y: hole.center.y - halfExtent,
+      },
+      {
+        x: hole.center.x + halfExtent,
+        y: hole.center.y + halfExtent,
       },
     )
   }
@@ -732,6 +748,27 @@ const getPadMetadataAttributes = (pad: PadsGeometryPad): string =>
     `data-decal="${escapeXml(pad.decalName)}"`,
   ].join(" ")
 
+const getChamferedPadPathData = (pad: PadsGeometryPad): string => {
+  const halfWidth = pad.width / 2
+  const halfHeight = pad.height / 2
+  const corner = Math.min(
+    Math.abs(pad.cornerRadius ?? 0),
+    halfWidth,
+    halfHeight,
+  )
+  return [
+    `M ${formatNumber(-halfWidth + corner)} ${formatNumber(-halfHeight)}`,
+    `L ${formatNumber(halfWidth - corner)} ${formatNumber(-halfHeight)}`,
+    `L ${formatNumber(halfWidth)} ${formatNumber(-halfHeight + corner)}`,
+    `L ${formatNumber(halfWidth)} ${formatNumber(halfHeight - corner)}`,
+    `L ${formatNumber(halfWidth - corner)} ${formatNumber(halfHeight)}`,
+    `L ${formatNumber(-halfWidth + corner)} ${formatNumber(halfHeight)}`,
+    `L ${formatNumber(-halfWidth)} ${formatNumber(halfHeight - corner)}`,
+    `L ${formatNumber(-halfWidth)} ${formatNumber(-halfHeight + corner)}`,
+    "Z",
+  ].join(" ")
+}
+
 const renderFootprintPads = (context: RenderContext): string => {
   const padsByLayer = new Map<string, PadsGeometryPad[]>()
   for (const pad of context.geometry.pads) {
@@ -767,14 +804,38 @@ const renderFootprintPads = (context: RenderContext): string => {
             return `<circle ${attributes} cx="${formatNumber(pad.center.x)}" cy="${formatNumber(pad.center.y)}" r="${formatNumber(Math.min(pad.width, pad.height) / 2)}"/>`
           }
 
+          if (pad.chamfered && (pad.cornerRadius ?? 0) > 0) {
+            return `<path ${attributes} data-corner-radius="${formatNumber(pad.cornerRadius ?? 0)}" data-chamfered="true" d="${getChamferedPadPathData(pad)}" transform="translate(${formatNumber(pad.center.x)} ${formatNumber(pad.center.y)}) rotate(${formatNumber(pad.rotation)})"/>`
+          }
+
           const cornerRadius =
-            pad.shape === "oval" ? Math.min(pad.width, pad.height) / 2 : 0
-          return `<rect ${attributes} x="${formatNumber(-pad.width / 2)}" y="${formatNumber(-pad.height / 2)}" width="${formatNumber(pad.width)}" height="${formatNumber(pad.height)}"${cornerRadius > 0 ? ` rx="${formatNumber(cornerRadius)}" ry="${formatNumber(cornerRadius)}"` : ""} transform="translate(${formatNumber(pad.center.x)} ${formatNumber(pad.center.y)}) rotate(${formatNumber(pad.rotation)})"/>`
+            pad.shape === "oval"
+              ? Math.min(pad.width, pad.height) / 2
+              : Math.min(
+                  Math.abs(pad.cornerRadius ?? 0),
+                  pad.width / 2,
+                  pad.height / 2,
+                )
+          return `<rect ${attributes}${(pad.cornerRadius ?? 0) > 0 ? ` data-corner-radius="${formatNumber(pad.cornerRadius ?? 0)}"` : ""} x="${formatNumber(-pad.width / 2)}" y="${formatNumber(-pad.height / 2)}" width="${formatNumber(pad.width)}" height="${formatNumber(pad.height)}"${cornerRadius > 0 ? ` rx="${formatNumber(cornerRadius)}" ry="${formatNumber(cornerRadius)}"` : ""} transform="translate(${formatNumber(pad.center.x)} ${formatNumber(pad.center.y)}) rotate(${formatNumber(pad.rotation)})"/>`
         })
         .join("")
       return `<g id="pads-${layerName}-component-pads" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="none"${context.boardClipAttribute}>${padElements}</g>`
     })
     .join("")
+}
+
+const holeIntersectsVisibleCopperLayer = ({
+  hole,
+  visibleCopperLayers,
+}: {
+  hole: PadsGeometryHole
+  visibleCopperLayers: Set<number>
+}): boolean => {
+  const firstLayer = Math.min(hole.startLayer, hole.endLayer)
+  const lastLayer = Math.max(hole.startLayer, hole.endLayer)
+  return [...visibleCopperLayers].some(
+    (layer) => layer >= firstLayer && layer <= lastLayer,
+  )
 }
 
 const renderDrills = ({ context }: { context: RenderContext }): string => {
@@ -793,7 +854,7 @@ const renderDrills = ({ context }: { context: RenderContext }): string => {
   }
   const filterDrillsByCopperLayer =
     context.visibleGerberLayers !== undefined && visibleCopperLayers.size > 0
-  const drillElements = context.geometry.circles
+  const viaDrillElements = context.geometry.circles
     .filter((circle) => circle.kind === "via")
     .filter((circle) => {
       if (!filterDrillsByCopperLayer) return true
@@ -830,6 +891,35 @@ const renderDrills = ({ context }: { context: RenderContext }): string => {
     })
     .join("")
 
+  const componentDrillElements = context.geometry.holes
+    .filter(
+      (hole) =>
+        isFinitePoint(hole.center) &&
+        Number.isFinite(hole.width) &&
+        Number.isFinite(hole.height) &&
+        hole.width > 0 &&
+        hole.height > 0,
+    )
+    .filter(
+      (hole) =>
+        !filterDrillsByCopperLayer ||
+        holeIntersectsVisibleCopperLayer({
+          hole,
+          visibleCopperLayers,
+        }),
+    )
+    .map((hole) => {
+      const layerSpanAttributes = ` data-start-layer="${formatNumber(hole.startLayer)}" data-end-layer="${formatNumber(hole.endLayer)}"`
+      const metadataAttributes = ` data-reference="${escapeXml(hole.reference)}" data-pin="${escapeXml(hole.pinNumber)}" data-decal="${escapeXml(hole.decalName)}" data-plated="${hole.plated ? "true" : "false"}"`
+      if (Math.abs(hole.width - hole.height) < 1e-6) {
+        return `<circle data-kind="component-drill"${layerSpanAttributes}${metadataAttributes} cx="${formatNumber(hole.center.x)}" cy="${formatNumber(hole.center.y)}" r="${formatNumber(hole.width / 2)}"/>`
+      }
+
+      const cornerRadius = Math.min(hole.width, hole.height) / 2
+      return `<rect data-kind="component-drill" data-slot="true"${layerSpanAttributes}${metadataAttributes} x="${formatNumber(-hole.width / 2)}" y="${formatNumber(-hole.height / 2)}" width="${formatNumber(hole.width)}" height="${formatNumber(hole.height)}" rx="${formatNumber(cornerRadius)}" ry="${formatNumber(cornerRadius)}" transform="translate(${formatNumber(hole.center.x)} ${formatNumber(hole.center.y)}) rotate(${formatNumber(hole.rotation)})"/>`
+    })
+    .join("")
+  const drillElements = viaDrillElements + componentDrillElements
   if (!drillElements) return ""
   return `<g id="pads-Drill" data-gerber-layer="Drill" fill="${escapeXml(context.drillColor)}" stroke="none"${context.boardClipAttribute}>${drillElements}</g>`
 }
@@ -1158,6 +1248,7 @@ export const generateSvgFromPadsGeometry = (
       paths: geometry.paths.length,
       circles: geometry.circles.length,
       pads: geometry.pads.length,
+      holes: geometry.holes.length,
       placements: geometry.placements.length,
       texts: geometry.texts.length,
       unassignedVertices: geometry.unassignedVertices.length,

@@ -3,6 +3,7 @@ import type {
   PadsBoardGeometry,
   PadsGeometryCircle,
   PadsGeometryCircleKind,
+  PadsGeometryHole,
   PadsGeometryLayerInfo,
   PadsGeometryPad,
   PadsGeometryPath,
@@ -931,6 +932,13 @@ interface AsciiPartDecalPadLayer {
   orientation: number
   length: number
   offset: number
+  cornerRadius: number
+  chamfered: boolean
+  drillDiameter: number
+  plated: boolean
+  slotOrientation: number
+  slotLength: number
+  slotOffset: number
   hasUnsupportedTrailingGeometry: boolean
 }
 
@@ -952,9 +960,13 @@ const isPartDecalHeader = (lineTokens: string[]): boolean =>
     .slice(2, 9)
     .every((token) => parseFiniteNumber(token) !== undefined)
 
-const parsePartDecalPadLayer = (
-  lineTokens: string[],
-): AsciiPartDecalPadLayer | undefined => {
+const parsePartDecalPadLayer = ({
+  lineTokens,
+  usesCornerRadiusFields,
+}: {
+  lineTokens: string[]
+  usesCornerRadiusFields: boolean
+}): AsciiPartDecalPadLayer | undefined => {
   const sourceLevel = parseFiniteNumber(lineTokens[0])
   const size = parseFiniteNumber(lineTokens[1])
   const shapeCode = lineTokens[2]?.toUpperCase()
@@ -968,11 +980,54 @@ const parsePartDecalPadLayer = (
     ? Math.abs(parseFiniteNumber(lineTokens[4]) ?? size)
     : Math.abs(size)
   const offset = fingerShape ? (parseFiniteNumber(lineTokens[5]) ?? 0) : 0
-  const trailingValueStart = fingerShape ? 6 : 3
-  const hasUnsupportedTrailingGeometry = lineTokens
-    .slice(trailingValueStart)
-    .map(parseFiniteNumber)
-    .some((value) => value !== undefined && Math.abs(value) > 0)
+  let trailingValueIndex = fingerShape ? 6 : 3
+  let cornerRadius = 0
+  let chamfered = false
+
+  if ((shapeCode === "S" || shapeCode === "RF") && usesCornerRadiusFields) {
+    const corner = parseFiniteNumber(lineTokens[trailingValueIndex]) ?? 0
+    cornerRadius = Math.abs(corner)
+    chamfered = corner < 0
+    trailingValueIndex++
+  } else if (shapeCode === "A") {
+    // Annular pads carry an inner-diameter field before their drill.
+    trailingValueIndex++
+  } else if (shapeCode === "RT" || shapeCode === "ST") {
+    // Thermal orientation, inner diameter, spoke width, and spoke count.
+    trailingValueIndex = 7
+  }
+
+  const parsedDrillDiameter = parseFiniteNumber(lineTokens[trailingValueIndex])
+  const drillDiameter =
+    parsedDrillDiameter === undefined ? 0 : Math.abs(parsedDrillDiameter)
+  if (parsedDrillDiameter !== undefined) trailingValueIndex++
+
+  let plated = true
+  const platedToken = lineTokens[trailingValueIndex]?.toUpperCase()
+  if (platedToken === "N" || platedToken === "P" || platedToken === "Y") {
+    plated = platedToken !== "N"
+    trailingValueIndex++
+  }
+
+  let slotOrientation = 0
+  let slotLength = 0
+  let slotOffset = 0
+  const parsedSlotOrientation = parseFiniteNumber(
+    lineTokens[trailingValueIndex],
+  )
+  const parsedSlotLength = parseFiniteNumber(lineTokens[trailingValueIndex + 1])
+  const parsedSlotOffset = parseFiniteNumber(lineTokens[trailingValueIndex + 2])
+  if (
+    parsedSlotOrientation !== undefined &&
+    parsedSlotLength !== undefined &&
+    parsedSlotOffset !== undefined
+  ) {
+    slotOrientation = parsedSlotOrientation
+    slotLength = Math.abs(parsedSlotLength)
+    slotOffset = parsedSlotOffset
+    trailingValueIndex += 3
+  }
+  const hasUnsupportedTrailingGeometry = trailingValueIndex < lineTokens.length
 
   return {
     sourceLevel: Math.trunc(sourceLevel),
@@ -981,22 +1036,37 @@ const parsePartDecalPadLayer = (
     orientation,
     length,
     offset,
+    cornerRadius,
+    chamfered,
+    drillDiameter,
+    plated,
+    slotOrientation,
+    slotLength,
+    slotOffset,
     hasUnsupportedTrailingGeometry,
   }
 }
 
 const parsePartDecalDefinitions = ({
   sections,
+  version,
   diagnostics,
 }: {
   sections: AsciiSectionLines[]
+  version: string
   diagnostics: string[]
 }): Map<string, AsciiPartDecalDefinition> => {
   const definitions = new Map<string, AsciiPartDecalDefinition>()
   let malformedPadStackCount = 0
+  const versionNumber = Number(/^V(\d+)/u.exec(version)?.[1])
 
   for (const section of sections) {
     if (section.name !== "PARTDECAL") continue
+    const usesCornerRadiusFields =
+      section.lines.some((lineText) => lineText.includes("[CORNERRADIUS]")) ||
+      (Number.isFinite(versionNumber) &&
+        versionNumber >= 9 &&
+        versionNumber < 2000)
 
     let currentDefinition: AsciiPartDecalDefinition | undefined
     let lineIndex = 0
@@ -1063,7 +1133,10 @@ const parsePartDecalDefinitions = ({
           continue
         }
         parsedStackLineCount++
-        const layer = parsePartDecalPadLayer(stackTokens)
+        const layer = parsePartDecalPadLayer({
+          lineTokens: stackTokens,
+          usesCornerRadiusFields,
+        })
         if (layer) layers.push(layer)
       }
       if (parsedStackLineCount !== normalizedStackLineCount) {
@@ -1208,12 +1281,14 @@ const addPlacedPartPads = ({
   definitions,
   layerCount,
   pads,
+  holes,
   diagnostics,
 }: {
   placements: PadsGeometryPlacement[]
   definitions: Map<string, AsciiPartDecalDefinition>
   layerCount: number
   pads: PadsGeometryPad[]
+  holes: PadsGeometryHole[]
   diagnostics: string[]
 }): void => {
   let unresolvedDecalCount = 0
@@ -1244,7 +1319,45 @@ const addPlacedPartPads = ({
         padStack.layers.find(
           (candidateLayer) => candidateLayer.sourceLevel === -2,
         )
-      if (!padLayer || padLayer.size <= 0) continue
+      if (!padLayer) continue
+
+      const drillLayer =
+        (padLayer.drillDiameter > 0 ? padLayer : undefined) ??
+        padStack.layers.find(
+          (candidateLayer) =>
+            candidateLayer.sourceLevel === -2 &&
+            candidateLayer.drillDiameter > 0,
+        )
+      if (drillLayer) {
+        const slotRotationRadians = (drillLayer.slotOrientation * Math.PI) / 180
+        const localHoleCenter = {
+          x:
+            terminal.location.x +
+            drillLayer.slotOffset * Math.cos(slotRotationRadians),
+          y:
+            terminal.location.y +
+            drillLayer.slotOffset * Math.sin(slotRotationRadians),
+        }
+        const localHoleRotation = placement.bottomLayer
+          ? 180 - drillLayer.slotOrientation
+          : drillLayer.slotOrientation
+        holes.push({
+          center: transformDecalPoint({
+            point: localHoleCenter,
+            placement,
+          }),
+          width: Math.max(drillLayer.drillDiameter, drillLayer.slotLength),
+          height: drillLayer.drillDiameter,
+          rotation: normalizeRotation(placement.rotation + localHoleRotation),
+          plated: drillLayer.plated,
+          startLayer: 1,
+          endLayer: layerCount,
+          reference: placement.reference,
+          pinNumber: terminal.pinNumber,
+          decalName,
+        })
+      }
+      if (padLayer.size <= 0) continue
 
       const shape =
         padLayer.shapeCode === "R"
@@ -1280,6 +1393,12 @@ const addPlacedPartPads = ({
             : padLayer.size,
         height: padLayer.size,
         shape,
+        ...(padLayer.cornerRadius > 0
+          ? {
+              cornerRadius: padLayer.cornerRadius,
+              chamfered: padLayer.chamfered,
+            }
+          : {}),
         rotation: normalizeRotation(placement.rotation + padRotation),
         layer: mountedLayer,
         reference: placement.reference,
@@ -1350,6 +1469,7 @@ export const extractAsciiBoardGeometry = (
   const viaDefinitions = parseViaDefinitions({ sections, diagnostics })
   const partDecalDefinitions = parsePartDecalDefinitions({
     sections,
+    version: document.version,
     diagnostics,
   })
   const decalNamesByPartType = parsePartTypeDecals(sections)
@@ -1358,6 +1478,7 @@ export const extractAsciiBoardGeometry = (
   const texts: PadsGeometryText[] = []
   const placements: PadsGeometryPlacement[] = []
   const pads: PadsGeometryPad[] = []
+  const holes: PadsGeometryHole[] = []
   const unverifiedViaLocations: PadsGeometryPoint[] = []
 
   for (const section of sections) {
@@ -1388,6 +1509,7 @@ export const extractAsciiBoardGeometry = (
     definitions: partDecalDefinitions,
     layerCount,
     pads,
+    holes,
     diagnostics,
   })
 
@@ -1401,6 +1523,7 @@ export const extractAsciiBoardGeometry = (
     texts,
     placements,
     pads,
+    holes,
     unassignedVertices: [],
     unverifiedConnections: [],
     unverifiedViaLocations,

@@ -89,8 +89,23 @@ export interface PadsGeometryPad {
   width: number
   height: number
   shape: "circle" | "square" | "rect" | "oval"
+  cornerRadius?: number
+  chamfered?: boolean
   rotation: number
   layer: number
+  reference: string
+  pinNumber: string
+  decalName: string
+}
+
+export interface PadsGeometryHole {
+  center: PadsGeometryPoint
+  width: number
+  height: number
+  rotation: number
+  plated: boolean
+  startLayer: number
+  endLayer: number
   reference: string
   pinNumber: string
   decalName: string
@@ -118,6 +133,7 @@ export interface PadsBoardGeometry {
   texts: PadsGeometryText[]
   placements: PadsGeometryPlacement[]
   pads: PadsGeometryPad[]
+  holes: PadsGeometryHole[]
   unassignedVertices: PadsGeometryPoint[]
   unverifiedConnections: PadsGeometryPath[]
   unverifiedViaLocations: PadsGeometryPoint[]

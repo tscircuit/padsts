@@ -181,6 +181,12 @@ with a typed ASCII AST.
       surface pads.
     - [ ] Decode drilled, slotted, rounded, chamfered, annular, thermal, odd,
       and custom pad geometry.
+      - [x] Decode round drills and explicit/default plated versus non-plated
+        state from both pre-corner-radius and corner-radius record dialects.
+      - [x] Decode slotted drill orientation, length, and offset.
+      - [x] Decode rounded and chamfered corners for square and
+        rectangular-finger pads.
+      - [ ] Decode annular, thermal, odd, and custom copper shapes.
   - [ ] Pad-stack references.
     - [x] Resolve default pin-0 and pin-specific pad stacks for placed
       terminals.
@@ -204,7 +210,8 @@ with a typed ASCII AST.
 - [ ] Render actual footprint geometry instead of placement crosses.
   - [x] Render resolved component pads on transformed top and bottom copper
     layers.
-  - [ ] Render decal graphics, text, holes, and unsupported pad shapes.
+  - [x] Render transformed round and slotted component holes.
+  - [ ] Render decal graphics, text, and remaining unsupported pad shapes.
 
 ### Nets, routes, and test points
 
@@ -397,8 +404,8 @@ partial and based on a small number of observed record offsets.
 
 ## P1: normalized board model
 
-- [x] Expose a small visualization model containing paths, circles, text,
-  placements, layer metadata, and diagnostics.
+- [x] Expose a small visualization model containing paths, circles, pads,
+  plated/non-plated holes, text, placements, layer metadata, and diagnostics.
 - [ ] Create a conversion-grade board model independent of ASCII/binary layout.
 - [ ] Model the complete layer stack with stable layer IDs and fabrication
   roles.
@@ -438,13 +445,16 @@ partial and based on a small number of observed record offsets.
 - [ ] Render footprint pads and graphics from decoded decals.
   - [x] Render round, square, rectangular, and oval surface pads with
     placement rotation, bottom-side mirroring, and finger offsets.
-  - [ ] Render drilled pads, slots, decal graphics, and decal text.
+  - [x] Render round drills, slotted drills, and rounded/chamfered copper pads.
+  - [ ] Render decal graphics and decal text.
 - [ ] Render verified pad-stack shapes and drill geometry.
   - [x] Render resolved ASCII round and square via apertures with exact drill
     radii and layer-span metadata.
   - [x] Render distinct round and square pads for each selected copper layer.
   - [x] Filter drill overlays to vias whose span intersects the selected
     copper layers.
+  - [x] Render component drills in the Excellon-style `Drill` group with
+    plating, terminal, decal, component, and layer-span metadata.
   - [ ] Render antipad and thermal geometry.
 - [ ] Render correct binary layer assignments.
 - [ ] Render verified board edges and cutouts for every binary version.
@@ -474,9 +484,13 @@ partial and based on a small number of observed record offsets.
       references.
     - [x] Assert resolved component-pad counts for the LCORE2, Dexter, EMS4,
       and TMS ASCII references.
+    - [x] Assert resolved component-hole counts and plating totals for the
+      LCORE2, Dexter, EMS4, and TMS ASCII references.
   - [ ] Representative coordinates and dimensions.
     - [x] Assert representative resolved via sizes, drill sizes, shapes, and
       layer spans.
+    - [x] Assert transformed round/slot dimensions, centers, rotations,
+      plating, and rounded/chamfered pad semantics.
   - [ ] No unexpected decoder diagnostics.
 - [ ] Compare rendered geometry with an independent importer, not only prior
   `padsts` snapshots.
@@ -551,6 +565,8 @@ partial and based on a small number of observed record offsets.
     layer-specific pad overrides with per-layer SVG snapshots.
   - [x] Cover transformed top/bottom round, square, rectangular-finger, and
     oval-finger component pads with per-layer SVG snapshots.
+  - [x] Cover plated/non-plated round and slotted component holes plus rounded
+    and chamfered pads with composite, top, bottom, and drill-only snapshots.
 - [ ] Add minimal synthetic binary fixtures for every versioned record layout.
 - [ ] Add malformed-record tests inside sections, not only malformed container
   tests.
