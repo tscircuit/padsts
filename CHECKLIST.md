@@ -117,6 +117,8 @@ with a typed ASCII AST.
 
 - [x] Extract straight `LINES` paths and simple circle pieces for visualization.
 - [x] Identify `BOARD`, copper, and keepout line objects heuristically.
+- [x] Classify `KEEPOUT`, `RESTRICTVIA`, `RESTRICTROUTE`, `RESTRICTAREA`, and
+  `PLACEMENT_KEEPOUT` line objects as keepout geometry.
 - [x] Extract basic free-text position, rotation, layer, height, stroke width,
   and mirror flag.
 - [ ] Parse every line-piece kind into typed geometry.
@@ -188,8 +190,11 @@ with a typed ASCII AST.
   - [ ] Layer transitions.
   - [ ] Width and width changes.
   - [ ] Via references and flags.
-  - [ ] Arc segments.
+  - [x] CW/CCW arc-center records, including exact center, radius, direction,
+    and sweep.
   - [ ] Teardrops, tuning, or other route annotations.
+- [x] Omit and diagnose route segments outside the declared copper-layer
+  stack.
 - [ ] Validate that routed endpoints resolve to pins, vias, or other route
   vertices.
 - [ ] Parse `TESTPOINT` records and associate them with nets and placed pads.
@@ -411,6 +416,7 @@ partial and based on a small number of observed record offsets.
 - [ ] Make bounds robust against corrupt or partially decoded entities.
   - [x] Prevent pathological intrinsic sizes such as the very tall `0x2021`
     snapshot.
+  - [x] Include path aperture width so thick traces are not clipped.
   - [ ] Report excluded outliers rather than silently trimming them.
   - [ ] Prefer verified board edges over placements and text.
 - [ ] Add selectable render modes.
@@ -480,7 +486,7 @@ partial and based on a small number of observed record offsets.
 
 - [x] Pin downloadable fixtures to a source commit.
 - [x] Verify downloaded fixtures with expected byte lengths and Git blob hashes.
-- [x] Cover five ASCII boards and native binary versions `0x2021`, `0x2025`,
+- [x] Cover seven ASCII boards and native binary versions `0x2021`, `0x2025`,
   `0x2026`, and `0x2027`.
 - [x] Keep same-board ASCII references for the Dexter, EMS4, LCORE2, and TMS
   native binary fixtures.

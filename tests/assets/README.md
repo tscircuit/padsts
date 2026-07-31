@@ -13,8 +13,8 @@ license links, expected byte lengths, and Git blob hashes.
 
 The pinned KiCad QA corpus includes:
 
-- five PADS ASCII fixtures, including same-board references for four native
-  binary files;
+- seven PADS ASCII fixtures, including same-board references for four native
+  binary files plus focused keepout and non-copper-route cases;
 - a native binary `0x2021` board;
 - a native binary `0x2025` board;
 - a native binary `0x2026` board; and

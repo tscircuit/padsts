@@ -137,12 +137,37 @@ const getPathPoints = (
   const points: PadsGeometryPoint[] = []
   for (const path of geometry.paths) {
     if (!includedKinds.has(path.kind)) continue
+    const pathExtentPoints: PadsGeometryPoint[] = []
     for (const point of path.points) {
-      if (isFinitePoint(point)) points.push(point)
+      if (isFinitePoint(point)) pathExtentPoints.push(point)
     }
     for (const segment of path.segments ?? []) {
       if (segment.kind !== "arc" || !isFinitePoint(segment.center)) continue
-      points.push(...getArcExtentPoints(segment).filter(isFinitePoint))
+      pathExtentPoints.push(
+        ...getArcExtentPoints(segment).filter(isFinitePoint),
+      )
+    }
+
+    const halfStrokeWidth = Math.abs(path.width) / 2
+    for (const point of pathExtentPoints) {
+      points.push(point)
+      if (
+        !Number.isFinite(halfStrokeWidth) ||
+        halfStrokeWidth <= 0 ||
+        halfStrokeWidth >= 1e12
+      ) {
+        continue
+      }
+      points.push(
+        {
+          x: point.x - halfStrokeWidth,
+          y: point.y - halfStrokeWidth,
+        },
+        {
+          x: point.x + halfStrokeWidth,
+          y: point.y + halfStrokeWidth,
+        },
+      )
     }
   }
   return points

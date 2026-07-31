@@ -96,6 +96,88 @@ describe("PADS ASCII", () => {
     )
   })
 
+  test("decodes clockwise and counter-clockwise route arc centers", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-MILS! DESIGN DATABASE ASCII FILE 1.0",
+      "*PCB*",
+      "MAXIMUMLAYER 2",
+      "*ROUTE*",
+      "*SIGNAL* CW_ARC",
+      "U1.1 U2.1",
+      "0 0 1 10 0",
+      "50 0 1 10 4096 CW",
+      "100 0 65 10 0",
+      "",
+      "*SIGNAL* CCW_ARC",
+      "U1.2 U2.2",
+      "0 100 1 12 0",
+      "50 100 1 12 4096 CCW",
+      "100 100 65 12 0",
+      "*END*",
+      "",
+    ].join("\n")
+    const geometry = extractPadsBoardGeometry(parsePadsAscii(sourceText))
+
+    expect(geometry.paths).toHaveLength(2)
+    expect(geometry.paths[0]).toMatchObject({
+      kind: "route",
+      layer: 1,
+      netName: "CW_ARC",
+      width: 10,
+      points: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+      segments: [
+        {
+          kind: "arc",
+          start: { x: 0, y: 0 },
+          end: { x: 100, y: 0 },
+          center: { x: 50, y: 0 },
+          radius: 50,
+          startAngle: 180,
+          deltaAngle: -180,
+        },
+      ],
+    })
+    expect(geometry.paths[1]).toMatchObject({
+      kind: "route",
+      layer: 1,
+      netName: "CCW_ARC",
+      width: 12,
+      segments: [
+        {
+          kind: "arc",
+          center: { x: 50, y: 100 },
+          radius: 50,
+          startAngle: 180,
+          deltaAngle: 180,
+        },
+      ],
+    })
+    expect(geometry.diagnostics).toEqual([])
+  })
+
+  test("does not approximate malformed route arcs as straight copper", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-MILS! DESIGN DATABASE ASCII FILE 1.0",
+      "*ROUTE*",
+      "*SIGNAL* MALFORMED_ARC",
+      "U1.1 U2.1",
+      "0 0 1 10 0",
+      "50 0 1 10 4096 CW",
+      "100 10 65 10 0",
+      "*END*",
+      "",
+    ].join("\n")
+    const geometry = extractPadsBoardGeometry(parsePadsAscii(sourceText))
+
+    expect(geometry.paths).toEqual([])
+    expect(geometry.diagnostics).toContain(
+      "1 ASCII route arc records could not be decoded",
+    )
+  })
+
   test("accepts numeric footprint names in part placements", () => {
     const sourceText = [
       "!PADS-POWERPCB-V9.5-BASIC! DESIGN DATABASE ASCII FILE 1.0",

@@ -157,7 +157,14 @@ const collectTopLevelSections = (sourceText: string): AsciiSectionLines[] => {
 
 const getPathKind = (objectType: string): PadsGeometryPathKind => {
   if (objectType === "BOARD") return "outline"
-  if (objectType.includes("KEEP")) return "keepout"
+  if (
+    objectType.includes("KEEP") ||
+    objectType === "RESTRICTVIA" ||
+    objectType === "RESTRICTROUTE" ||
+    objectType === "RESTRICTAREA"
+  ) {
+    return "keepout"
+  }
   if (objectType.includes("COPPER")) return "copper"
   return "drawing"
 }
@@ -341,32 +348,106 @@ const addLineSectionGeometry = ({
 
 const addRouteSectionGeometry = ({
   section,
+  layerCount,
   paths,
   circles,
   diagnostics,
 }: {
   section: AsciiSectionLines
+  layerCount: number
   paths: PadsGeometryPath[]
   circles: PadsGeometryCircle[]
   diagnostics: string[]
 }): void => {
+  type RoutePoint = PadsGeometryPoint & { layer: number; width: number }
+  type PendingRouteArc = {
+    center: PadsGeometryPoint
+    direction: "CW" | "CCW"
+    layer: number
+    rawLayer: number
+    width: number
+  }
+
   let netName = ""
   let skippedUnroutedSegmentCount = 0
-  let previousPoint:
-    | (PadsGeometryPoint & { layer?: number; width: number })
-    | undefined
+  let skippedNonCopperSegmentCount = 0
+  let malformedArcCount = 0
+  let previousPoint: RoutePoint | undefined
+  let pendingArc: PendingRouteArc | undefined
+
+  const resetRouteState = (): void => {
+    if (pendingArc) malformedArcCount++
+    previousPoint = undefined
+    pendingArc = undefined
+  }
+
+  const getArcSegment = ({
+    start,
+    end,
+    pending,
+  }: {
+    start: PadsGeometryPoint
+    end: PadsGeometryPoint
+    pending: PendingRouteArc
+  }): Extract<PadsGeometryPathSegment, { kind: "arc" }> | undefined => {
+    const startRadius = Math.hypot(
+      start.x - pending.center.x,
+      start.y - pending.center.y,
+    )
+    const endRadius = Math.hypot(
+      end.x - pending.center.x,
+      end.y - pending.center.y,
+    )
+    const radiusTolerance = Math.max(
+      1e-6,
+      Math.max(startRadius, endRadius) * 1e-6,
+    )
+    if (
+      startRadius <= radiusTolerance ||
+      Math.abs(startRadius - endRadius) > radiusTolerance
+    ) {
+      return undefined
+    }
+
+    const startAngle =
+      (Math.atan2(start.y - pending.center.y, start.x - pending.center.x) *
+        180) /
+      Math.PI
+    const endAngle =
+      (Math.atan2(end.y - pending.center.y, end.x - pending.center.x) * 180) /
+      Math.PI
+    let deltaAngle = endAngle - startAngle
+    if (pending.direction === "CCW") {
+      while (deltaAngle <= 0) deltaAngle += 360
+    } else {
+      while (deltaAngle >= 0) deltaAngle -= 360
+    }
+
+    return {
+      kind: "arc",
+      start,
+      end,
+      center: pending.center,
+      radius: startRadius,
+      startAngle,
+      deltaAngle,
+    }
+  }
+
+  const layerIsCopper = (layer: number): boolean =>
+    layer >= 1 && layer <= layerCount
 
   for (const lineText of section.lines) {
     const signalMatch = /^\*SIGNAL\*\s*(\S*)/u.exec(lineText.trim())
     if (signalMatch) {
       netName = signalMatch[1] ?? ""
-      previousPoint = undefined
+      resetRouteState()
       continue
     }
 
     const lineTokens = tokenizeLine(lineText)
     if (lineTokens.length === 0 || lineTokens[0]?.startsWith("*REMARK")) {
-      previousPoint = undefined
+      resetRouteState()
       continue
     }
 
@@ -383,7 +464,7 @@ const addRouteSectionGeometry = ({
           netName,
         })
       }
-      previousPoint = undefined
+      resetRouteState()
       continue
     }
 
@@ -392,27 +473,73 @@ const addRouteSectionGeometry = ({
     const rawLayer = parseFiniteNumber(lineTokens[2])
     const width = Math.abs(parseFiniteNumber(lineTokens[3]) ?? 0)
     if (x === undefined || y === undefined || rawLayer === undefined) {
-      previousPoint = undefined
+      resetRouteState()
       continue
     }
 
     const layer =
       rawLayer === 65 ? (previousPoint?.layer ?? rawLayer) : rawLayer
     const currentPoint = { x, y, layer, width }
-    if (previousPoint) {
-      if ((previousPoint.layer ?? 0) > 0 && layer > 0 && rawLayer !== 0) {
-        paths.push({
-          kind: "route",
-          points: [previousPoint, currentPoint],
-          closed: false,
-          width: width || previousPoint.width,
-          layer,
-          netName,
-        })
+    const arcDirection = lineTokens
+      .slice(5)
+      .find((token): token is "CW" | "CCW" => token === "CW" || token === "CCW")
+    if (arcDirection) {
+      if (!previousPoint || pendingArc) {
+        malformedArcCount++
+        pendingArc = undefined
       } else {
+        pendingArc = {
+          center: { x, y },
+          direction: arcDirection,
+          layer,
+          rawLayer,
+          width,
+        }
+      }
+      continue
+    }
+
+    if (previousPoint) {
+      const segmentLayer = pendingArc?.layer ?? layer
+      const segmentRawLayer = pendingArc?.rawLayer ?? rawLayer
+      if (
+        previousPoint.layer === 0 ||
+        segmentLayer === 0 ||
+        layer === 0 ||
+        segmentRawLayer === 0 ||
+        rawLayer === 0
+      ) {
         skippedUnroutedSegmentCount++
+      } else if (
+        !layerIsCopper(previousPoint.layer) ||
+        !layerIsCopper(segmentLayer) ||
+        !layerIsCopper(layer)
+      ) {
+        skippedNonCopperSegmentCount++
+      } else {
+        const arcSegment = pendingArc
+          ? getArcSegment({
+              start: previousPoint,
+              end: currentPoint,
+              pending: pendingArc,
+            })
+          : undefined
+        if (pendingArc && !arcSegment) {
+          malformedArcCount++
+        } else {
+          paths.push({
+            kind: "route",
+            points: [previousPoint, currentPoint],
+            ...(arcSegment ? { segments: [arcSegment] } : {}),
+            closed: false,
+            width: width || pendingArc?.width || previousPoint.width,
+            layer: segmentLayer,
+            netName,
+          })
+        }
       }
     }
+    pendingArc = undefined
 
     const hasViaName = lineTokens
       .slice(5)
@@ -431,9 +558,21 @@ const addRouteSectionGeometry = ({
     previousPoint = currentPoint
   }
 
+  if (pendingArc) malformedArcCount++
+
   if (skippedUnroutedSegmentCount > 0) {
     diagnostics.push(
       `${skippedUnroutedSegmentCount} unrouted ASCII connections omitted from fabrication geometry`,
+    )
+  }
+  if (skippedNonCopperSegmentCount > 0) {
+    diagnostics.push(
+      `${skippedNonCopperSegmentCount} ASCII route segments on non-copper layers omitted from fabrication geometry`,
+    )
+  }
+  if (malformedArcCount > 0) {
+    diagnostics.push(
+      `${malformedArcCount} ASCII route arc records could not be decoded`,
     )
   }
 }
@@ -548,6 +687,8 @@ export const extractAsciiBoardGeometry = (
   document: PadsAsciiDocument,
 ): PadsBoardGeometry => {
   const sections = collectTopLevelSections(document.getString())
+  const layers = parseLayerInfo(sections)
+  const layerCount = parseLayerCount(sections, layers)
   const paths: PadsGeometryPath[] = []
   const circles: PadsGeometryCircle[] = []
   const texts: PadsGeometryText[] = []
@@ -558,7 +699,13 @@ export const extractAsciiBoardGeometry = (
     if (section.name === "LINES") {
       addLineSectionGeometry({ section, paths, circles, diagnostics })
     } else if (section.name === "ROUTE") {
-      addRouteSectionGeometry({ section, paths, circles, diagnostics })
+      addRouteSectionGeometry({
+        section,
+        layerCount,
+        paths,
+        circles,
+        diagnostics,
+      })
     } else if (section.name === "TEXT") {
       addTextSectionGeometry(section, texts)
     } else if (section.name === "PART") {
@@ -566,11 +713,10 @@ export const extractAsciiBoardGeometry = (
     }
   }
 
-  const layers = parseLayerInfo(sections)
   return {
     sourceFormat: "ascii",
     version: document.version,
-    layerCount: parseLayerCount(sections, layers),
+    layerCount,
     layers,
     paths,
     circles,
