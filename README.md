@@ -70,8 +70,13 @@ transformed through top and mirrored bottom placements. Layer names, types,
 roles, and sides decoded from `LAYER` and nested `MISC` `LAYER DATA` records
 place these graphics on front/back silkscreen, fabrication, mask, paste,
 drill-drawing, or user-drawing groups without treating ordinary component
-outlines as copper. Experimental native-binary route and via candidates are
-withheld from fabrication layers.
+outlines as copper. Positive `COPCLS`, `COPOPN`, and `COPCIR` pieces preserve
+pin and tag-group association and render on physical copper, mask, or paste
+layers. `KPTCLS` and `KPTCIR` pieces retain their PADS restriction codes and
+render as Gerber-style keepout artwork. Compound negative `COPCUT` and `COPCCO`
+geometry remains diagnostic-only until polarity-aware group composition is
+implemented. Experimental native-binary route and via candidates are withheld
+from fabrication layers.
 
 Parser diagnostics and decoded counts are retained in SVG metadata. Optional
 binary section and unresolved-vertex overlays can be enabled explicitly:
@@ -111,6 +116,11 @@ const zoomedSvg = generateSvgFromPads(sourceBytes, {
   showText: false,
 })
 ```
+
+Artwork is clipped to the decoded board outline by default. Set
+`clipArtworkToBoardOutline: false` when a coordinate window intentionally
+inspects staged or off-board parts; the physical board substrate remains
+outline-clipped.
 
 ## Why lossless parsing comes first
 

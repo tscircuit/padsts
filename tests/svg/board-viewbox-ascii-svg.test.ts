@@ -40,3 +40,16 @@ test("rejects invalid board-coordinate zoom windows", () => {
     expect(() => generateSvgFromPads(document, { viewBox })).toThrow(RangeError)
   }
 })
+
+test("can inspect artwork outside the decoded board outline", () => {
+  const svg = generateSvgFromPads(document, {
+    viewBox: { x: 60, y: 75, width: 200, height: 160 },
+    visibleGerberLayers: ["F_Cu", "Drill"],
+    clipArtworkToBoardOutline: false,
+    showPlacements: false,
+    showText: false,
+  })
+
+  expect(svg.match(/ clip-path="url\(#pads-board-outline\)"/gu)).toHaveLength(1)
+  expect(svg).toContain("&quot;clipArtworkToBoardOutline&quot;:false")
+})

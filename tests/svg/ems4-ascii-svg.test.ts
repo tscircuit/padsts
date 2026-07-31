@@ -19,6 +19,12 @@ test.skipIf(!isAvailable)(
     const vias = geometry.circles.filter((circle) => circle.kind === "via")
     const decalPaths = geometry.paths.filter((path) => path.reference)
     const decalCircles = geometry.circles.filter((circle) => circle.reference)
+    const decalCopperPaths = decalPaths.filter(
+      (path) => path.sourcePieceKind === "COPCLS",
+    )
+    const decalKeepoutPaths = decalPaths.filter(
+      (path) => path.sourcePieceKind === "KPTCLS",
+    )
     const svg = await renderDownloadedPadsAsset(asset)
     expect(vias).toHaveLength(1074)
     expect(vias.every((via) => via.drillRadius !== undefined)).toBe(true)
@@ -29,8 +35,66 @@ test.skipIf(!isAvailable)(
     expect(geometry.pads).toHaveLength(1_279)
     expect(geometry.holes).toHaveLength(44)
     expect(geometry.holes.filter((hole) => !hole.plated)).toHaveLength(40)
-    expect(decalPaths).toHaveLength(409)
+    expect(decalPaths).toHaveLength(428)
     expect(decalCircles).toHaveLength(2)
+    expect(decalCopperPaths).toHaveLength(4)
+    expect(
+      decalCopperPaths.filter((path) => path.gerberLayer === "F_Cu"),
+    ).toHaveLength(2)
+    expect(
+      decalCopperPaths.filter((path) => path.gerberLayer === "B_Cu"),
+    ).toHaveLength(2)
+    expect(decalCopperPaths.map((path) => path.pinNumber).sort()).toEqual([
+      "1",
+      "1",
+      "2",
+      "2",
+    ])
+    expect(decalKeepoutPaths).toHaveLength(15)
+    expect(
+      decalKeepoutPaths.every(
+        (path) => path.gerberLayer === "Keepout" && path.restrictions === "R",
+      ),
+    ).toBe(true)
+    const l5Pin1Copper = decalCopperPaths.find(
+      (path) => path.reference === "L5" && path.pinNumber === "1",
+    )
+    const l6Pin1Copper = decalCopperPaths.find(
+      (path) => path.reference === "L6" && path.pinNumber === "1",
+    )
+    expect(l5Pin1Copper).toMatchObject({
+      gerberLayer: "F_Cu",
+      polarity: "positive",
+    })
+    expect(l5Pin1Copper?.points[0]).toEqual({
+      x: 7_836_000,
+      y: 14_650_500,
+    })
+    expect(
+      l5Pin1Copper?.segments?.find((segment) => segment.kind === "arc"),
+    ).toMatchObject({
+      center: { x: 11_811_000, y: 13_525_500 },
+      radius: 2_784_107,
+      deltaAngle: 125.5,
+    })
+    expect(l6Pin1Copper).toMatchObject({
+      gerberLayer: "B_Cu",
+      polarity: "positive",
+    })
+    expect(l6Pin1Copper?.points[0]).toEqual({
+      x: 10_312_500,
+      y: 7_638_000,
+    })
+    expect(
+      l6Pin1Copper?.segments?.find((segment) => segment.kind === "arc"),
+    ).toMatchObject({
+      center: { x: 14_287_500, y: 8_763_000 },
+      radius: 2_784_107,
+      deltaAngle: -125.5,
+    })
+    expect(geometry.diagnostics).toEqual([
+      "530 unrouted ASCII connections omitted from fabrication geometry",
+    ])
     expect(
       geometry.layers.find((layer) => layer.name === "Silkscreen Top"),
     ).toMatchObject({ role: "silkscreen", side: "top" })
@@ -91,6 +155,36 @@ test.skipIf(!isAvailable)(
             "B_Fab",
             "Edge_Cuts",
           ],
+        },
+        {
+          name: "l5-front-custom-copper",
+          viewBox: {
+            x: 6_000_000,
+            y: 9_000_000,
+            width: 11_000_000,
+            height: 10_000_000,
+          },
+          visibleGerberLayers: ["F_Cu"],
+        },
+        {
+          name: "l6-back-custom-copper",
+          viewBox: {
+            x: 9_000_000,
+            y: 3_000_000,
+            width: 11_000_000,
+            height: 11_000_000,
+          },
+          visibleGerberLayers: ["B_Cu"],
+        },
+        {
+          name: "c61-component-keepout",
+          viewBox: {
+            x: 17_000_000,
+            y: -500_000,
+            width: 3_000_000,
+            height: 2_000_000,
+          },
+          visibleGerberLayers: ["Keepout"],
         },
       ],
     })

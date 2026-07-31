@@ -29,6 +29,20 @@ test("renders transformed part-decal graphics on physical board layers", async (
       side: "bottom",
     },
     {
+      number: 21,
+      name: "Solder Mask Top",
+      type: "SOLDER_MASK",
+      role: "solder-mask",
+      side: "top",
+    },
+    {
+      number: 23,
+      name: "Paste Mask Top",
+      type: "PASTE_MASK",
+      role: "paste-mask",
+      side: "top",
+    },
+    {
       number: 26,
       name: "Silkscreen Top",
       type: "SILK_SCREEN",
@@ -57,10 +71,47 @@ test("renders transformed part-decal graphics on physical board layers", async (
       side: "bottom",
     },
   ])
-  expect(geometry.paths).toHaveLength(5)
-  expect(geometry.circles).toHaveLength(2)
+  expect(geometry.paths).toHaveLength(11)
+  expect(geometry.circles).toHaveLength(6)
   expect(geometry.pads).toHaveLength(2)
   expect(geometry.diagnostics).toEqual([])
+  expect(
+    geometry.paths.filter(
+      (path) =>
+        path.kind === "copper" &&
+        ["F_Cu", "B_Cu"].includes(path.gerberLayer ?? ""),
+    ),
+  ).toHaveLength(2)
+  expect(
+    geometry.paths.filter(
+      (path) =>
+        path.kind === "copper" &&
+        ["F_Paste", "B_Paste"].includes(path.gerberLayer ?? ""),
+    ),
+  ).toHaveLength(2)
+  expect(
+    geometry.circles.filter(
+      (circle) =>
+        circle.kind === "copper" &&
+        ["F_Mask", "B_Mask"].includes(circle.gerberLayer ?? ""),
+    ),
+  ).toHaveLength(2)
+  expect(geometry.paths.filter((path) => path.kind === "keepout")).toHaveLength(
+    2,
+  )
+  expect(
+    geometry.circles.filter((circle) => circle.kind === "keepout"),
+  ).toHaveLength(2)
+  expect(
+    geometry.paths
+      .filter((path) => path.sourcePieceKind === "COPCLS")
+      .map((path) => path.pinNumber),
+  ).toEqual(["1", "1", "1", "1"])
+  expect(
+    geometry.paths
+      .filter((path) => path.sourcePieceKind === "KPTCLS")
+      .map((path) => path.restrictions),
+  ).toEqual(["RV", "RV"])
 
   const topArcPath = geometry.paths.find(
     (path) => path.reference === "U1" && path.gerberLayer === "F_Silkscreen",
@@ -69,6 +120,8 @@ test("renders transformed part-decal graphics on physical board layers", async (
     layer: 26,
     reference: "U1",
     decalName: "GRAPHIC_DECAL",
+    sourcePieceKind: "OPEN",
+    groupId: "U1:GRAPHIC_DECAL:tag-1",
     segments: [
       {
         kind: "arc",
@@ -87,6 +140,7 @@ test("renders transformed part-decal graphics on physical board layers", async (
   expect(bottomArcPath).toMatchObject({
     layer: 26,
     reference: "U2",
+    groupId: "U2:GRAPHIC_DECAL:tag-1",
     segments: [
       {
         kind: "arc",
@@ -110,6 +164,11 @@ test("renders transformed part-decal graphics on physical board layers", async (
         "B_Silkscreen",
         "F_Fab",
         "B_Fab",
+        "F_Mask",
+        "B_Mask",
+        "F_Paste",
+        "B_Paste",
+        "Keepout",
         "Edge_Cuts",
       ],
     },
@@ -124,6 +183,18 @@ test("renders transformed part-decal graphics on physical board layers", async (
     {
       name: "fabrication",
       layers: ["F_Fab", "B_Fab", "Edge_Cuts"],
+    },
+    {
+      name: "front-copper-mask-paste",
+      layers: ["F_Cu", "F_Mask", "F_Paste", "Edge_Cuts"],
+    },
+    {
+      name: "back-copper-mask-paste",
+      layers: ["B_Cu", "B_Mask", "B_Paste", "Edge_Cuts"],
+    },
+    {
+      name: "keepout",
+      layers: ["Keepout", "Edge_Cuts"],
     },
   ]
   for (const view of views) {

@@ -39,6 +39,11 @@ export interface GeneratePadsSvgOptions {
   showUnassignedVertices?: boolean
   showPlacements?: boolean
   showText?: boolean
+  /**
+   * Clip fabrication artwork to the decoded board outline. Disable this for
+   * inspection windows that intentionally target staged or off-board parts.
+   */
+  clipArtworkToBoardOutline?: boolean
 }
 
 export type PadsSvgInput = PadsDocument | string | Uint8Array
@@ -54,7 +59,7 @@ interface RenderContext {
   geometry: PadsBoardGeometry
   bounds: GeometryBounds
   minimumFeatureSize: number
-  boardClipAttribute: string
+  artworkClipAttribute: string
   drillColor: string
   layerColors: Record<string, string>
   visibleGerberLayers?: Set<string>
@@ -484,6 +489,11 @@ const getMetadataAttributes = ({
   netName,
   reference,
   decalName,
+  sourcePieceKind,
+  polarity,
+  pinNumber,
+  restrictions,
+  groupId,
 }: {
   kind: string
   layer?: number | string
@@ -492,6 +502,11 @@ const getMetadataAttributes = ({
   netName?: string
   reference?: string
   decalName?: string
+  sourcePieceKind?: string
+  polarity?: "positive" | "negative"
+  pinNumber?: string
+  restrictions?: string
+  groupId?: string
 }): string =>
   [
     `data-kind="${escapeXml(kind)}"`,
@@ -501,6 +516,13 @@ const getMetadataAttributes = ({
     netName ? `data-net="${escapeXml(netName)}"` : "",
     reference ? `data-reference="${escapeXml(reference)}"` : "",
     decalName ? `data-decal="${escapeXml(decalName)}"` : "",
+    sourcePieceKind
+      ? `data-source-piece-kind="${escapeXml(sourcePieceKind)}"`
+      : "",
+    polarity ? `data-polarity="${polarity}"` : "",
+    pinNumber ? `data-pin="${escapeXml(pinNumber)}"` : "",
+    restrictions ? `data-restrictions="${escapeXml(restrictions)}"` : "",
+    groupId ? `data-group="${escapeXml(groupId)}"` : "",
   ]
     .filter(Boolean)
     .join(" ")
@@ -527,10 +549,12 @@ const renderCopperPaths = (context: RenderContext): string => {
   const pathsByLayer = new Map<string, PadsGeometryPath[]>()
   for (const path of context.geometry.paths) {
     if (path.kind !== "route" && path.kind !== "copper") continue
-    const layerName = getGerberCopperLayerName({
-      geometry: context.geometry,
-      layer: path.layer,
-    })
+    const layerName =
+      path.gerberLayer ??
+      getGerberCopperLayerName({
+        geometry: context.geometry,
+        layer: path.layer,
+      })
     const layerPaths = pathsByLayer.get(layerName) ?? []
     layerPaths.push(path)
     pathsByLayer.set(layerName, layerPaths)
@@ -558,7 +582,7 @@ const renderCopperPaths = (context: RenderContext): string => {
         })
         .join("")
 
-      return `<g id="pads-${layerName}" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${context.boardClipAttribute}>${pathElements}</g>`
+      return `<g id="pads-${layerName}" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${context.artworkClipAttribute}>${pathElements}</g>`
     })
     .join("")
 }
@@ -722,10 +746,12 @@ const renderCopperCircles = ({
   for (const circle of context.geometry.circles) {
     if (circle.kind !== "via" && circle.kind !== "copper") continue
     if (circle.kind === "copper") {
-      const layerName = getGerberCopperLayerName({
-        geometry: context.geometry,
-        layer: circle.layer,
-      })
+      const layerName =
+        circle.gerberLayer ??
+        getGerberCopperLayerName({
+          geometry: context.geometry,
+          layer: circle.layer,
+        })
       if (!shouldRenderLayer(context, layerName)) continue
       const layerFlashes = flashesByLayer.get(layerName) ?? []
       layerFlashes.push({ circle })
@@ -790,7 +816,7 @@ const renderCopperCircles = ({
         })
         .join("")
 
-      return `<g id="pads-${layerName}-flashes" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${context.boardClipAttribute}>${circleElements}</g>`
+      return `<g id="pads-${layerName}-flashes" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${context.artworkClipAttribute}>${circleElements}</g>`
     })
     .join("")
 }
@@ -875,7 +901,7 @@ const renderFootprintPads = (context: RenderContext): string => {
           return `<rect ${attributes}${(pad.cornerRadius ?? 0) > 0 ? ` data-corner-radius="${formatNumber(pad.cornerRadius ?? 0)}"` : ""} x="${formatNumber(-pad.width / 2)}" y="${formatNumber(-pad.height / 2)}" width="${formatNumber(pad.width)}" height="${formatNumber(pad.height)}"${cornerRadius > 0 ? ` rx="${formatNumber(cornerRadius)}" ry="${formatNumber(cornerRadius)}"` : ""} transform="translate(${formatNumber(pad.center.x)} ${formatNumber(pad.center.y)}) rotate(${formatNumber(pad.rotation)})"/>`
         })
         .join("")
-      return `<g id="pads-${layerName}-component-pads" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="none"${context.boardClipAttribute}>${padElements}</g>`
+      return `<g id="pads-${layerName}-component-pads" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="none"${context.artworkClipAttribute}>${padElements}</g>`
     })
     .join("")
 }
@@ -977,7 +1003,7 @@ const renderDrills = ({ context }: { context: RenderContext }): string => {
     .join("")
   const drillElements = viaDrillElements + componentDrillElements
   if (!drillElements) return ""
-  return `<g id="pads-Drill" data-gerber-layer="Drill" fill="${escapeXml(context.drillColor)}" stroke="none"${context.boardClipAttribute}>${drillElements}</g>`
+  return `<g id="pads-Drill" data-gerber-layer="Drill" fill="${escapeXml(context.drillColor)}" stroke="none"${context.artworkClipAttribute}>${drillElements}</g>`
 }
 
 const renderDrawingGeometry = (context: RenderContext): string => {
@@ -1034,7 +1060,7 @@ const renderDrawingGeometry = (context: RenderContext): string => {
         layerName,
         layerColors: context.layerColors,
       })
-      return `<g id="pads-${escapeXml(layerName)}-drawings" data-gerber-layer="${escapeXml(layerName)}" color="${color}" fill="currentColor" stroke="currentColor"${context.boardClipAttribute}>${drawingPaths}${drawingCircles}</g>`
+      return `<g id="pads-${escapeXml(layerName)}-drawings" data-gerber-layer="${escapeXml(layerName)}" color="${color}" fill="currentColor" stroke="currentColor"${context.artworkClipAttribute}>${drawingPaths}${drawingCircles}</g>`
     })
     .join("")
 }
@@ -1104,7 +1130,7 @@ const renderPlacements = (context: RenderContext): string => {
       layerName,
       layerColors: context.layerColors,
     })
-    return `<g id="pads-${layerName}-placements" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${context.boardClipAttribute}>${elements.join("")}</g>`
+    return `<g id="pads-${layerName}-placements" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${context.artworkClipAttribute}>${elements.join("")}</g>`
   }
 
   return (
@@ -1143,7 +1169,7 @@ const renderTexts = (context: RenderContext): string => {
     layerName: "F_Silkscreen",
     layerColors: context.layerColors,
   })
-  return `<g id="pads-F_Silkscreen-text" data-gerber-layer="F_Silkscreen" color="${color}" fill="currentColor" stroke="currentColor"${context.boardClipAttribute}>${textElements}</g>`
+  return `<g id="pads-F_Silkscreen-text" data-gerber-layer="F_Silkscreen" color="${color}" fill="currentColor" stroke="currentColor"${context.artworkClipAttribute}>${textElements}</g>`
 }
 
 const renderOutline = (context: RenderContext): string => {
@@ -1192,7 +1218,7 @@ const renderUnassignedVertices = (context: RenderContext): string => {
     layerName: "Debug_Vertices",
     layerColors: context.layerColors,
   })
-  return `<g id="pads-Debug_Vertices" data-gerber-layer="Debug_Vertices" color="${color}" fill="currentColor" fill-opacity="0.4"${context.boardClipAttribute}>${elements.join("")}</g>`
+  return `<g id="pads-Debug_Vertices" data-gerber-layer="Debug_Vertices" color="${color}" fill="currentColor" fill-opacity="0.4"${context.artworkClipAttribute}>${elements.join("")}</g>`
 }
 
 const renderUnverifiedConnections = (context: RenderContext): string => {
@@ -1226,7 +1252,7 @@ const renderUnverifiedConnections = (context: RenderContext): string => {
     layerName: "Debug_Connections",
     layerColors: context.layerColors,
   })
-  return `<g id="pads-Debug_Connections" data-gerber-layer="Debug_Connections" color="${color}" fill="currentColor" fill-opacity="0.55" stroke="currentColor"${context.boardClipAttribute}>${connectionElements}${viaElements}</g>`
+  return `<g id="pads-Debug_Connections" data-gerber-layer="Debug_Connections" color="${color}" fill="currentColor" fill-opacity="0.55" stroke="currentColor"${context.artworkClipAttribute}>${connectionElements}${viaElements}</g>`
 }
 
 const renderBinarySectionSummary = ({
@@ -1293,8 +1319,10 @@ export const generateSvgFromPadsGeometry = (
   const outlinePaths = geometry.paths.filter(
     (path) => path.kind === "outline" && path.points.length >= 3,
   )
-  const boardClipAttribute =
+  const outlineClipAttribute =
     outlinePaths.length > 0 ? ' clip-path="url(#pads-board-outline)"' : ""
+  const artworkClipAttribute =
+    options.clipArtworkToBoardOutline === false ? "" : outlineClipAttribute
   const { apertures, apertureByKey } = getViaApertures(
     geometry,
     minimumFeatureSize,
@@ -1303,7 +1331,7 @@ export const generateSvgFromPadsGeometry = (
     geometry,
     bounds,
     minimumFeatureSize,
-    boardClipAttribute,
+    artworkClipAttribute,
     drillColor,
     layerColors,
     visibleGerberLayers: options.visibleGerberLayers
@@ -1323,6 +1351,7 @@ export const generateSvgFromPadsGeometry = (
     diagnostics: geometry.diagnostics,
     visibleGerberLayers: options.visibleGerberLayers,
     boardViewBox: options.viewBox,
+    clipArtworkToBoardOutline: options.clipArtworkToBoardOutline,
     counts: {
       paths: geometry.paths.length,
       circles: geometry.circles.length,
@@ -1353,7 +1382,7 @@ export const generateSvgFromPadsGeometry = (
     "</defs>",
     `<rect data-kind="negative-space" x="${formatNumber(bounds.minimumX)}" y="${formatNumber(-bounds.maximumY)}" width="${formatNumber(boundsWidth)}" height="${formatNumber(boundsHeight)}" fill="${escapeXml(backgroundColor)}"/>`,
     '<g transform="scale(1,-1)">',
-    `<g id="pads-FR4"${boardClipAttribute}><rect x="${formatNumber(bounds.minimumX)}" y="${formatNumber(bounds.minimumY)}" width="${formatNumber(boundsWidth)}" height="${formatNumber(boundsHeight)}" fill="${escapeXml(boardColor)}"/></g>`,
+    `<g id="pads-FR4"${outlineClipAttribute}><rect x="${formatNumber(bounds.minimumX)}" y="${formatNumber(bounds.minimumY)}" width="${formatNumber(boundsWidth)}" height="${formatNumber(boundsHeight)}" fill="${escapeXml(boardColor)}"/></g>`,
     renderCopperPaths(context),
     renderCopperCircles({ context, apertureByKey }),
     renderFootprintPads(context),

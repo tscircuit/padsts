@@ -18,6 +18,9 @@ test.skipIf(!isAvailable)(
     const geometry = await extractDownloadedPadsAssetGeometry(asset)
     const decalPaths = geometry.paths.filter((path) => path.reference)
     const decalCircles = geometry.circles.filter((circle) => circle.reference)
+    const decalCopperPaths = decalPaths.filter(
+      (path) => path.sourcePieceKind === "COPCLS",
+    )
     const svg = await renderDownloadedPadsAsset(asset)
     expect(geometry.pads).toHaveLength(1_760)
     expect(geometry.holes).toHaveLength(66)
@@ -26,8 +29,41 @@ test.skipIf(!isAvailable)(
     ).toHaveLength(3)
     expect(geometry.holes.filter((hole) => hole.plated)).toHaveLength(58)
     expect(geometry.holes.filter((hole) => !hole.plated)).toHaveLength(8)
-    expect(decalPaths).toHaveLength(1_110)
+    expect(decalPaths).toHaveLength(1_425)
     expect(decalCircles).toHaveLength(101)
+    expect(decalCopperPaths).toHaveLength(315)
+    expect(
+      decalCopperPaths.filter((path) => path.gerberLayer === "F_Cu"),
+    ).toHaveLength(105)
+    expect(
+      decalCopperPaths.filter((path) => path.gerberLayer === "F_Mask"),
+    ).toHaveLength(105)
+    expect(
+      decalCopperPaths.filter((path) => path.gerberLayer === "F_Paste"),
+    ).toHaveLength(105)
+    const u18Pin1Copper = decalCopperPaths.find(
+      (path) =>
+        path.reference === "U18" &&
+        path.pinNumber === "1" &&
+        path.gerberLayer === "F_Cu",
+    )
+    expect(u18Pin1Copper).toMatchObject({
+      polarity: "positive",
+    })
+    expect(u18Pin1Copper?.points[0]).toEqual({
+      x: 384_067_500,
+      y: 114_685_500,
+    })
+    expect(
+      u18Pin1Copper?.segments?.find((segment) => segment.kind === "arc"),
+    ).toMatchObject({
+      center: { x: 385_192_500, y: 114_460_500 },
+      radius: 225_000,
+      deltaAngle: -180,
+    })
+    expect(geometry.diagnostics).toEqual([
+      "1202 unrouted ASCII connections omitted from fabrication geometry",
+    ])
     expect(
       geometry.layers.find((layer) => layer.name === "Assembly Drawing Top"),
     ).toMatchObject({ role: "assembly", side: "top" })
@@ -82,6 +118,28 @@ test.skipIf(!isAvailable)(
             "B_Fab",
             "Edge_Cuts",
           ],
+        },
+        {
+          name: "u18-custom-copper",
+          viewBox: {
+            x: 382_000_000,
+            y: 107_000_000,
+            width: 11_000_000,
+            height: 11_000_000,
+          },
+          visibleGerberLayers: ["F_Cu"],
+          clipArtworkToBoardOutline: false,
+        },
+        {
+          name: "u18-custom-mask-paste",
+          viewBox: {
+            x: 382_000_000,
+            y: 107_000_000,
+            width: 11_000_000,
+            height: 11_000_000,
+          },
+          visibleGerberLayers: ["F_Mask", "F_Paste"],
+          clipArtworkToBoardOutline: false,
         },
       ],
     })

@@ -976,7 +976,17 @@ const PART_DECAL_PIECE_KINDS = new Set([
   "TAG",
 ])
 
-const SUPPORTED_PART_DECAL_DRAWING_KINDS = new Set(["OPEN", "CLOSED", "CIRCLE"])
+const SUPPORTED_PART_DECAL_COPPER_KINDS = new Set([
+  "COPCLS",
+  "COPOPN",
+  "COPCIR",
+])
+
+const SUPPORTED_PART_DECAL_KEEPOUT_KINDS = new Set(["KPTCLS", "KPTCIR"])
+
+const PART_DECAL_CIRCLE_KINDS = new Set(["CIRCLE", "COPCIR", "KPTCIR"])
+
+const PART_DECAL_CLOSED_KINDS = new Set(["CLOSED", "COPCLS", "KPTCLS"])
 
 const parsePartDecalPadLayer = ({
   lineTokens,
@@ -1077,7 +1087,9 @@ const parsePartDecalDefinitions = ({
   const definitions = new Map<string, AsciiPartDecalDefinition>()
   let malformedPadStackCount = 0
   let malformedPieceArcCount = 0
-  let unsupportedPieceCount = 0
+  let unsupportedCutoutPieceCount = 0
+  let allLayerCopperPieceCount = 0
+  let malformedTagCount = 0
   const versionNumber = Number(/^V(\d+)/u.exec(version)?.[1])
 
   for (const section of sections) {
@@ -1094,10 +1106,14 @@ const parsePartDecalDefinitions = ({
 
     let currentDefinition: AsciiPartDecalDefinition | undefined
     let remainingPieceCount = 0
+    let tagGroupSequence = 0
+    let activeTagGroups: { id: string; pinNumber?: string }[] = []
     let lineIndex = 0
     while (lineIndex < section.lines.length) {
       const lineTokens = tokenizeLine(section.lines[lineIndex] ?? "")
       if (isPartDecalHeader(lineTokens)) {
+        malformedTagCount += activeTagGroups.length
+        activeTagGroups = []
         const name = lineTokens[0]
         if (name) {
           currentDefinition = {
@@ -1135,6 +1151,19 @@ const parsePartDecalDefinitions = ({
         const layer = parseFiniteNumber(
           lineTokens[usesPieceLineStyleField ? 4 : 3],
         )
+        const trailingToken =
+          lineTokens[usesPieceLineStyleField ? 5 : 4]?.toUpperCase()
+        const sourcePinIndex =
+          pieceKind.startsWith("COP") || pieceKind === "TAG"
+            ? parseFiniteNumber(trailingToken)
+            : undefined
+        const explicitPinNumber =
+          sourcePinIndex !== undefined && sourcePinIndex >= 0
+            ? String(Math.trunc(sourcePinIndex) + 1)
+            : undefined
+        const restrictions = pieceKind.startsWith("KPT")
+          ? trailingToken
+          : undefined
         const points: PadsGeometryPoint[] = []
         const segments: PadsGeometryPathSegment[] = []
         let currentPoint: PadsGeometryPoint | undefined
@@ -1186,16 +1215,58 @@ const parsePartDecalDefinitions = ({
         }
 
         remainingPieceCount--
-        if (!SUPPORTED_PART_DECAL_DRAWING_KINDS.has(pieceKind)) {
-          unsupportedPieceCount++
+        if (pieceKind === "TAG") {
+          if (layer === 1) {
+            activeTagGroups.push({
+              id: `${currentDefinition.name}:tag-${++tagGroupSequence}`,
+              ...(explicitPinNumber ? { pinNumber: explicitPinNumber } : {}),
+            })
+          } else if (layer === 0 && activeTagGroups.length > 0) {
+            activeTagGroups.pop()
+          } else {
+            malformedTagCount++
+          }
           continue
         }
-        if (pieceKind === "CIRCLE" && points.length >= 2) {
+        if (pieceKind === "COPCUT" || pieceKind === "COPCCO") {
+          unsupportedCutoutPieceCount++
+          continue
+        }
+        if (SUPPORTED_PART_DECAL_COPPER_KINDS.has(pieceKind) && layer === 0) {
+          allLayerCopperPieceCount++
+          continue
+        }
+
+        const geometryKind: PadsGeometryPathKind =
+          SUPPORTED_PART_DECAL_COPPER_KINDS.has(pieceKind)
+            ? "copper"
+            : SUPPORTED_PART_DECAL_KEEPOUT_KINDS.has(pieceKind)
+              ? "keepout"
+              : "drawing"
+        const activeTagGroup = activeTagGroups.at(-1)
+        const pinNumber = explicitPinNumber ?? activeTagGroup?.pinNumber
+        const sharedPieceProperties = {
+          layer,
+          name: currentDefinition.name,
+          decalName: currentDefinition.name,
+          sourcePieceKind: pieceKind,
+          polarity: "positive" as const,
+          ...(pinNumber ? { pinNumber } : {}),
+          ...(restrictions ? { restrictions } : {}),
+          ...(activeTagGroup ? { groupId: activeTagGroup.id } : {}),
+        }
+
+        if (PART_DECAL_CIRCLE_KINDS.has(pieceKind) && points.length >= 2) {
           const firstPoint = points[0]
           const secondPoint = points[1]
           if (firstPoint && secondPoint) {
             currentDefinition.circles.push({
-              kind: "drawing",
+              kind:
+                geometryKind === "copper"
+                  ? "copper"
+                  : geometryKind === "keepout"
+                    ? "keepout"
+                    : "drawing",
               center: {
                 x: (firstPoint.x + secondPoint.x) / 2,
                 y: (firstPoint.y + secondPoint.y) / 2,
@@ -1206,15 +1277,13 @@ const parsePartDecalDefinitions = ({
                   secondPoint.y - firstPoint.y,
                 ) / 2,
               width,
-              layer,
-              name: currentDefinition.name,
-              decalName: currentDefinition.name,
+              ...sharedPieceProperties,
             })
           }
           continue
         }
         if (points.length >= 2) {
-          const closed = pieceKind === "CLOSED"
+          const closed = PART_DECAL_CLOSED_KINDS.has(pieceKind)
           if (closed) {
             const firstPoint = points[0]
             if (firstPoint) {
@@ -1226,14 +1295,12 @@ const parsePartDecalDefinitions = ({
             }
           }
           currentDefinition.paths.push({
-            kind: "drawing",
+            kind: geometryKind,
             points,
             segments,
             closed,
             width,
-            layer,
-            name: currentDefinition.name,
-            decalName: currentDefinition.name,
+            ...sharedPieceProperties,
           })
         }
         continue
@@ -1294,6 +1361,7 @@ const parsePartDecalDefinitions = ({
       }
       currentDefinition.padStacks.set(pinNumber, { pinNumber, layers })
     }
+    malformedTagCount += activeTagGroups.length
   }
 
   if (malformedPadStackCount > 0) {
@@ -1306,9 +1374,19 @@ const parsePartDecalDefinitions = ({
       `${malformedPieceArcCount} ASCII part-decal arc records could not be decoded`,
     )
   }
-  if (unsupportedPieceCount > 0) {
+  if (unsupportedCutoutPieceCount > 0) {
     diagnostics.push(
-      `${unsupportedPieceCount} ASCII part-decal copper, keepout, or tag pieces were not added to drawing geometry`,
+      `${unsupportedCutoutPieceCount} ASCII part-decal copper cutout pieces require polarity-aware group rendering`,
+    )
+  }
+  if (allLayerCopperPieceCount > 0) {
+    diagnostics.push(
+      `${allLayerCopperPieceCount} ASCII part-decal copper pieces target all layers and were not assigned to a fabrication layer`,
+    )
+  }
+  if (malformedTagCount > 0) {
+    diagnostics.push(
+      `${malformedTagCount} ASCII part-decal tag records have unmatched group boundaries`,
     )
   }
   return definitions
@@ -1437,15 +1515,27 @@ const transformDecalPoint = ({
 
 const getPhysicalDecalGerberLayer = ({
   sourceLayer,
+  pieceKind,
   placement,
   layers,
+  layerCount,
 }: {
   sourceLayer: number | undefined
+  pieceKind: PadsGeometryPathKind | PadsGeometryCircleKind
   placement: PadsGeometryPlacement
   layers: PadsGeometryLayerInfo[]
+  layerCount: number
 }): string => {
+  if (pieceKind === "keepout") return "Keepout"
+  if (pieceKind === "copper" && sourceLayer === -1) {
+    return placement.bottomLayer ? "F_Cu" : "B_Cu"
+  }
   if (sourceLayer === undefined || sourceLayer === 0) {
-    return placement.bottomLayer ? "B_Fab" : "F_Fab"
+    return pieceKind === "drawing"
+      ? placement.bottomLayer
+        ? "B_Fab"
+        : "F_Fab"
+      : "Dwgs_User"
   }
 
   const layerInfo = layers.find((layer) => layer.number === sourceLayer)
@@ -1481,9 +1571,18 @@ const getPhysicalDecalGerberLayer = ({
     return "Dwgs_User"
   }
 
+  if (pieceKind === "copper") {
+    if (physicalSide === "top") return "F_Cu"
+    if (physicalSide === "bottom") return "B_Cu"
+    if (sourceLayer > 1 && sourceLayer < layerCount) {
+      return `In${sourceLayer - 1}_Cu`
+    }
+    return "Dwgs_User"
+  }
+
   // OPEN/CLOSED/CIRCLE decal pieces are component-outline drawings even when
   // their source level names a routing layer. Copper-bearing decal pieces use
-  // the distinct COP* record kinds and remain quarantined until decoded.
+  // the distinct COP* record kinds.
   return physicalSide === "bottom" ? "B_Fab" : "F_Fab"
 }
 
@@ -1517,12 +1616,14 @@ const addPlacedPartGraphics = ({
   placements,
   definitions,
   layers,
+  layerCount,
   paths,
   circles,
 }: {
   placements: PadsGeometryPlacement[]
   definitions: Map<string, AsciiPartDecalDefinition>
   layers: PadsGeometryLayerInfo[]
+  layerCount: number
   paths: PadsGeometryPath[]
   circles: PadsGeometryCircle[]
 }): void => {
@@ -1546,12 +1647,17 @@ const addPlacedPartGraphics = ({
         ),
         gerberLayer: getPhysicalDecalGerberLayer({
           sourceLayer,
+          pieceKind: path.kind,
           placement,
           layers,
+          layerCount,
         }),
         name: `${placement.reference}:${decalName}`,
         reference: placement.reference,
         decalName,
+        ...(path.groupId
+          ? { groupId: `${placement.reference}:${path.groupId}` }
+          : {}),
       })
     }
 
@@ -1568,12 +1674,17 @@ const addPlacedPartGraphics = ({
         }),
         gerberLayer: getPhysicalDecalGerberLayer({
           sourceLayer,
+          pieceKind: circle.kind,
           placement,
           layers,
+          layerCount,
         }),
         name: `${placement.reference}:${decalName}`,
         reference: placement.reference,
         decalName,
+        ...(circle.groupId
+          ? { groupId: `${placement.reference}:${circle.groupId}` }
+          : {}),
       })
     }
   }
@@ -2010,6 +2121,7 @@ export const extractAsciiBoardGeometry = (
     placements,
     definitions: partDecalDefinitions,
     layers,
+    layerCount,
     paths,
     circles,
   })

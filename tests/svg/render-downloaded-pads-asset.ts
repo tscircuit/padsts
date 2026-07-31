@@ -130,6 +130,7 @@ export interface BoardZoomSnapshotView {
   name: string
   viewBox: PadsSvgBoardViewBox
   visibleGerberLayers?: string[]
+  clipArtworkToBoardOutline?: boolean
 }
 
 export const expectBoardZoomSnapshotViews = async ({
@@ -146,6 +147,7 @@ export const expectBoardZoomSnapshotViews = async ({
       width: 1000,
       viewBox: view.viewBox,
       visibleGerberLayers: view.visibleGerberLayers ?? COPPER_VIEW_LAYERS,
+      clipArtworkToBoardOutline: view.clipArtworkToBoardOutline,
       showPlacements: false,
       showText: false,
     })

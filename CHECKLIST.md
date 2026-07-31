@@ -196,9 +196,15 @@ with a typed ASCII AST.
     - [x] Decode straight, circular, and exact-arc `OPEN`, `CLOSED`, and
       `CIRCLE` pieces and retain their source layer.
     - [x] Transform those pieces through top and mirrored bottom placements.
-    - [ ] Decode decal copper, keepout, tag, and other piece kinds.
+    - [x] Decode positive `COPCLS`, `COPOPN`, and `COPCIR` copper pieces with
+      pin association and layer routing.
+    - [x] Decode `KPTCLS` and `KPTCIR` keepouts with restriction codes.
+    - [x] Preserve nested `TAG` group membership and inherited pin association.
+    - [ ] Decode polarity-aware `COPCUT`/`COPCCO` cutouts and other piece kinds.
   - [ ] Reference/value text templates.
   - [ ] Copper, keepout, and placement-outline primitives.
+    - [x] Positive copper and keepout primitives.
+    - [ ] Compound copper cutouts and placement outlines.
 - [ ] Parse `PARTTYPE` definitions.
   - [ ] Part type name and decal alternatives.
     - [x] Resolve colon-separated decal alternatives and zero-based `PART ALT`
@@ -219,8 +225,9 @@ with a typed ASCII AST.
   - [x] Render transformed round and slotted component holes.
   - [x] Render basic decal drawing pieces on normalized silkscreen,
     fabrication, and drawing layers.
-  - [ ] Render decal text, copper/keepout pieces, and remaining unsupported pad
-    shapes.
+  - [x] Render positive decal copper and keepout pieces.
+  - [ ] Render decal text, compound copper cutouts, and remaining unsupported
+    pad shapes.
 
 ### Nets, routes, and test points
 
@@ -458,7 +465,8 @@ partial and based on a small number of observed record offsets.
     placement rotation, bottom-side mirroring, and finger offsets.
   - [x] Render round drills, slotted drills, and rounded/chamfered copper pads.
   - [x] Render straight, circular, and exact-arc decal graphics.
-  - [ ] Render decal copper/keepout pieces and decal text.
+  - [x] Render positive decal copper and keepout pieces.
+  - [ ] Render compound decal copper cutouts and decal text.
 - [ ] Render verified pad-stack shapes and drill geometry.
   - [x] Render resolved ASCII round and square via apertures with exact drill
     radii and layer-span metadata.
@@ -474,6 +482,8 @@ partial and based on a small number of observed record offsets.
   keepout layers when the source contains them.
   - [x] Map decoded basic decal drawings onto front/back silkscreen,
     fabrication, mask, paste, drill-drawing, and user-drawing groups.
+  - [x] Map positive decal copper pieces onto physical copper, mask, and paste
+    groups and decal keepouts onto the keepout group.
 - [ ] Render pours with cutouts and thermal reliefs.
 - [ ] Make bottom-side mirroring match fabrication conventions.
   - [x] Mirror and rotate basic decal paths, circles, and arc sweep direction.
@@ -512,6 +522,8 @@ partial and based on a small number of observed record offsets.
       plating, and rounded/chamfered pad semantics.
     - [x] Assert transformed top/bottom decal arc centers, endpoints, rotations,
       and mirrored sweep direction.
+    - [x] Assert representative custom-copper pin association, layer routing,
+      exact-arc geometry, polarity, and keepout restriction codes.
   - [ ] No unexpected decoder diagnostics.
 - [ ] Compare rendered geometry with an independent importer, not only prior
   `padsts` snapshots.
@@ -595,6 +607,8 @@ partial and based on a small number of observed record offsets.
   - [x] Cover source-layer roles and transformed top/bottom straight, circular,
     closed, and exact-arc decal graphics with isolated silkscreen/fab
     snapshots.
+  - [x] Cover positive copper on copper/mask/paste layers, keepout restrictions,
+    and tag grouping with isolated front/back/keepout snapshots.
 - [ ] Add minimal synthetic binary fixtures for every versioned record layout.
 - [ ] Add malformed-record tests inside sections, not only malformed container
   tests.

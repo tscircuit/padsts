@@ -44,6 +44,11 @@ export interface PadsGeometryPath {
   netName?: string
   reference?: string
   decalName?: string
+  sourcePieceKind?: string
+  polarity?: "positive" | "negative"
+  pinNumber?: string
+  restrictions?: string
+  groupId?: string
 }
 
 export type PadsGeometryCircleKind = "via" | "copper" | "keepout" | "drawing"
@@ -70,6 +75,11 @@ export interface PadsGeometryCircle {
   netName?: string
   reference?: string
   decalName?: string
+  sourcePieceKind?: string
+  polarity?: "positive" | "negative"
+  pinNumber?: string
+  restrictions?: string
+  groupId?: string
 }
 
 export interface PadsGeometryText {
