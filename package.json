@@ -33,7 +33,7 @@
     "url": "https://github.com/tscircuit/padsts"
   },
   "scripts": {
-    "prepare": "bun run build",
+    "prepare": "bunx --package tsup tsup-node lib/index.ts lib/cli.ts --format esm --dts --clean",
     "build": "tsup-node lib/index.ts lib/cli.ts --format esm --dts --clean",
     "test": "bun test",
     "test:assets": "bun test tests/downloaded-assets.test.ts",
