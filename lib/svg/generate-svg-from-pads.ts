@@ -12,9 +12,23 @@ import {
 } from "../geometry"
 import { type PadsDocument, parsePads } from "../parse-pads"
 
+export interface PadsSvgBoardViewBox {
+  /** Minimum X coordinate in the PADS board coordinate system. */
+  x: number
+  /** Minimum Y coordinate in the PADS board coordinate system. */
+  y: number
+  width: number
+  height: number
+}
+
 export interface GeneratePadsSvgOptions {
   width?: number
   height?: number
+  /**
+   * Optional zoom window in native board coordinates. `x` and `y` identify
+   * the lower-left corner before the renderer's global SVG Y-axis flip.
+   */
+  viewBox?: PadsSvgBoardViewBox
   backgroundColor?: string
   boardColor?: string
   drillColor?: string
@@ -285,6 +299,32 @@ const getBounds = (geometry: PadsBoardGeometry): GeometryBounds => {
     minimumY: minimumY - padding,
     maximumX: maximumX + padding,
     maximumY: maximumY + padding,
+  }
+}
+
+const getRequestedBounds = (viewBox: PadsSvgBoardViewBox): GeometryBounds => {
+  const values = [viewBox.x, viewBox.y, viewBox.width, viewBox.height]
+  if (
+    !values.every(Number.isFinite) ||
+    viewBox.width <= 0 ||
+    viewBox.height <= 0
+  ) {
+    throw new RangeError(
+      "SVG board-coordinate viewBox requires finite x/y and positive finite width/height",
+    )
+  }
+
+  const maximumX = viewBox.x + viewBox.width
+  const maximumY = viewBox.y + viewBox.height
+  if (!Number.isFinite(maximumX) || !Number.isFinite(maximumY)) {
+    throw new RangeError("SVG board-coordinate viewBox exceeds numeric range")
+  }
+
+  return {
+    minimumX: viewBox.x,
+    minimumY: viewBox.y,
+    maximumX,
+    maximumY,
   }
 }
 
@@ -1190,7 +1230,9 @@ export const generateSvgFromPadsGeometry = (
   geometry: PadsBoardGeometry,
   options: GeneratePadsSvgOptions = {},
 ): string => {
-  const bounds = getBounds(geometry)
+  const bounds = options.viewBox
+    ? getRequestedBounds(options.viewBox)
+    : getBounds(geometry)
   const boundsWidth = Math.max(bounds.maximumX - bounds.minimumX, 1)
   const boundsHeight = Math.max(bounds.maximumY - bounds.minimumY, 1)
   const totalWidth = Math.max(1, options.width ?? 1200)
@@ -1244,6 +1286,7 @@ export const generateSvgFromPadsGeometry = (
     layerCount: geometry.layerCount,
     diagnostics: geometry.diagnostics,
     visibleGerberLayers: options.visibleGerberLayers,
+    boardViewBox: options.viewBox,
     counts: {
       paths: geometry.paths.length,
       circles: geometry.circles.length,

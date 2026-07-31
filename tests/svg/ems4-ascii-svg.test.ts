@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import {
+  expectBoardZoomSnapshotViews,
   expectGerberStyleSvg,
   expectVisualSnapshotViews,
   extractDownloadedPadsAssetGeometry,
@@ -36,6 +37,39 @@ test.skipIf(!isAvailable)(
     await expectVisualSnapshotViews({
       asset,
       testFilePath: import.meta.path,
+    })
+    await expectBoardZoomSnapshotViews({
+      asset,
+      testFilePath: import.meta.path,
+      views: [
+        {
+          name: "u1-u3-fine-pitch",
+          viewBox: {
+            x: -32_000_000,
+            y: -12_000_000,
+            width: 26_000_000,
+            height: 27_000_000,
+          },
+        },
+        {
+          name: "u10-u11-fine-pitch",
+          viewBox: {
+            x: 18_000_000,
+            y: -2_000_000,
+            width: 12_000_000,
+            height: 15_000_000,
+          },
+        },
+        {
+          name: "upper-left-mount",
+          viewBox: {
+            x: -44_000_000,
+            y: 22_000_000,
+            width: 10_000_000,
+            height: 11_000_000,
+          },
+        },
+      ],
     })
   },
 )

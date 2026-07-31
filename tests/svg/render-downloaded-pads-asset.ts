@@ -4,6 +4,7 @@ import {
   type GeneratePadsSvgOptions,
   generateSvgFromPads,
   type PadsBoardGeometry,
+  type PadsSvgBoardViewBox,
   parsePads,
 } from "../../lib"
 import {
@@ -116,6 +117,35 @@ export const expectVisualSnapshotViews = async ({
       allowBinarySectionSummary: view.options.showBinarySectionSummary === true,
     })
     await expect(svg).toMatchSvgSnapshot(testFilePath, view.name)
+  }
+}
+
+export interface BoardZoomSnapshotView {
+  name: string
+  viewBox: PadsSvgBoardViewBox
+  visibleGerberLayers?: string[]
+}
+
+export const expectBoardZoomSnapshotViews = async ({
+  asset,
+  testFilePath,
+  views,
+}: {
+  asset: SvgTestAsset
+  testFilePath: string
+  views: BoardZoomSnapshotView[]
+}): Promise<void> => {
+  for (const view of views) {
+    const svg = await renderDownloadedPadsAsset(asset, {
+      width: 1000,
+      viewBox: view.viewBox,
+      visibleGerberLayers: view.visibleGerberLayers ?? COPPER_VIEW_LAYERS,
+      showPlacements: false,
+      showText: false,
+    })
+    expectGerberStyleSvg(svg)
+    expect(svg).toContain("&quot;boardViewBox&quot;")
+    await expect(svg).toMatchSvgSnapshot(testFilePath, `zoom-${view.name}`)
   }
 }
 

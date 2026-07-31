@@ -431,6 +431,8 @@ partial and based on a small number of observed record offsets.
 
 - [x] Generate SVG from a parsed document, string, or byte array.
 - [x] Use native-coordinate `viewBox` values and one global Y-axis flip.
+- [x] Accept an explicit native board-coordinate zoom window and translate its
+  lower-left Y coordinate to the SVG `viewBox` convention.
 - [x] Group artwork into Gerber-style `F_Cu`, internal copper, `B_Cu`,
   silkscreen, drill, and edge-cut layers.
 - [x] Use reusable SVG aperture definitions for via flashes.
@@ -476,6 +478,7 @@ partial and based on a small number of observed record offsets.
   - [ ] Bottom composite.
   - [x] Full copper overlay.
   - [x] Debug/coverage view.
+  - [x] Arbitrary board-coordinate detail windows for close-up inspection.
 - [ ] Use stable, source-linked element IDs and `data-*` attributes.
 - [ ] Add semantic assertions alongside image snapshots.
   - [ ] Expected layer names.
@@ -554,6 +557,10 @@ partial and based on a small number of observed record offsets.
 - [x] Keep downloaded fixture contents gitignored.
 - [x] Run parse and byte-for-byte round-trip tests for downloaded fixtures.
 - [x] Run SVG snapshot tests for downloaded fixtures.
+- [x] Keep dedicated drill-only and feature-level board-coordinate zoom
+  snapshots for the real ASCII reference boards.
+- [x] Require each new geometry-decoder increment to add or update focused
+  close-up snapshots that expose the affected features at inspectable scale.
 - [ ] Add a typed expected-results manifest for every fixture.
   - [ ] Units and layer count.
   - [ ] Board extents.

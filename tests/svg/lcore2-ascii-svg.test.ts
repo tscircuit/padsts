@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import {
+  expectBoardZoomSnapshotViews,
   expectGerberStyleSvg,
   expectVisualSnapshotViews,
   extractDownloadedPadsAssetGeometry,
@@ -35,5 +36,29 @@ test.skipIf(!isAvailable)("renders the LCORE 2 ASCII board", async () => {
   await expectVisualSnapshotViews({
     asset,
     testFilePath: import.meta.path,
+  })
+  await expectBoardZoomSnapshotViews({
+    asset,
+    testFilePath: import.meta.path,
+    views: [
+      {
+        name: "dense-components",
+        viewBox: {
+          x: -10_500_000,
+          y: -22_500_000,
+          width: 18_000_000,
+          height: 12_000_000,
+        },
+      },
+      {
+        name: "mechanical-holes",
+        viewBox: {
+          x: 5_500_000,
+          y: -31_500_000,
+          width: 9_000_000,
+          height: 8_000_000,
+        },
+      },
+    ],
   })
 })

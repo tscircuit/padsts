@@ -87,6 +87,25 @@ const debugSvg = generateSvgFromPads(sourceBytes, {
 `visibleGerberLayers` can also produce single-layer, copper-only, or drill-only
 inspection views without changing the parsed geometry.
 
+Use `viewBox` to inspect a smaller window in the source board's native
+coordinates. `x` and `y` are the lower-left board-coordinate corner; the
+renderer applies the SVG Y-axis conversion automatically:
+
+```ts
+const zoomedSvg = generateSvgFromPads(sourceBytes, {
+  width: 1000,
+  viewBox: {
+    x: -10_500_000,
+    y: -22_500_000,
+    width: 18_000_000,
+    height: 12_000_000,
+  },
+  visibleGerberLayers: ["F_Cu", "B_Cu", "Drill", "Edge_Cuts"],
+  showPlacements: false,
+  showText: false,
+})
+```
+
 ## Why lossless parsing comes first
 
 PADS ASCII is documented well enough to decode section-by-section. Native
