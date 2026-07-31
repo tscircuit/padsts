@@ -176,12 +176,21 @@ with a typed ASCII AST.
 - [ ] Parse `PARTDECAL` footprint definitions.
   - [ ] Decal origin and units.
   - [ ] Pads and terminals.
+    - [x] Decode terminal positions and explicit or implicit pin numbers.
+    - [x] Decode basic round, square, rectangular-finger, and oval-finger
+      surface pads.
+    - [ ] Decode drilled, slotted, rounded, chamfered, annular, thermal, odd,
+      and custom pad geometry.
   - [ ] Pad-stack references.
+    - [x] Resolve default pin-0 and pin-specific pad stacks for placed
+      terminals.
   - [ ] Silkscreen, assembly, courtyard, and fabrication graphics.
   - [ ] Reference/value text templates.
   - [ ] Copper, keepout, and placement-outline primitives.
 - [ ] Parse `PARTTYPE` definitions.
   - [ ] Part type name and decal alternatives.
+    - [x] Resolve colon-separated decal alternatives and zero-based `PART ALT`
+      selection, including legacy headers without an explicit units field.
   - [ ] Gate and pin definitions.
   - [ ] Pin numbers, names, swaps, and electrical types where present.
 - [ ] Parse complete `PART` instances.
@@ -190,7 +199,12 @@ with a typed ASCII AST.
   - [ ] Attributes and variant data.
   - [ ] Pin instances transformed into board coordinates.
 - [ ] Resolve part → part type → decal → pad-stack references.
+  - [x] Resolve supported placed surface pads through this complete reference
+    chain.
 - [ ] Render actual footprint geometry instead of placement crosses.
+  - [x] Render resolved component pads on transformed top and bottom copper
+    layers.
+  - [ ] Render decal graphics, text, holes, and unsupported pad shapes.
 
 ### Nets, routes, and test points
 
@@ -422,6 +436,9 @@ partial and based on a small number of observed record offsets.
 - [x] Render exact circular arcs.
 - [ ] Render other curve primitives.
 - [ ] Render footprint pads and graphics from decoded decals.
+  - [x] Render round, square, rectangular, and oval surface pads with
+    placement rotation, bottom-side mirroring, and finger offsets.
+  - [ ] Render drilled pads, slots, decal graphics, and decal text.
 - [ ] Render verified pad-stack shapes and drill geometry.
   - [x] Render resolved ASCII round and square via apertures with exact drill
     radii and layer-span metadata.
@@ -455,6 +472,8 @@ partial and based on a small number of observed record offsets.
   - [ ] Expected entity counts.
     - [x] Assert exact routed-via counts for the LCORE2, Dexter, and EMS4 ASCII
       references.
+    - [x] Assert resolved component-pad counts for the LCORE2, Dexter, EMS4,
+      and TMS ASCII references.
   - [ ] Representative coordinates and dimensions.
     - [x] Assert representative resolved via sizes, drill sizes, shapes, and
       layer spans.
@@ -530,6 +549,8 @@ partial and based on a small number of observed record offsets.
 - [ ] Add small synthetic ASCII fixtures for every record type and edge case.
   - [x] Cover top/interior/bottom via pads, partial spans, and explicit
     layer-specific pad overrides with per-layer SVG snapshots.
+  - [x] Cover transformed top/bottom round, square, rectangular-finger, and
+    oval-finger component pads with per-layer SVG snapshots.
 - [ ] Add minimal synthetic binary fixtures for every versioned record layout.
 - [ ] Add malformed-record tests inside sections, not only malformed container
   tests.

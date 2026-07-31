@@ -566,6 +566,7 @@ export const extractBinaryBoardGeometry = (
     circles,
     texts,
     placements,
+    pads: [],
     unassignedVertices: vertices,
     unverifiedConnections,
     unverifiedViaLocations,

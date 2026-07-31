@@ -4,6 +4,7 @@ import type {
   PadsGeometryCircle,
   PadsGeometryCircleKind,
   PadsGeometryLayerInfo,
+  PadsGeometryPad,
   PadsGeometryPath,
   PadsGeometryPathKind,
   PadsGeometryPathSegment,
@@ -918,10 +919,231 @@ const addTextSectionGeometry = (
   }
 }
 
-const addPartSectionGeometry = (
-  section: AsciiSectionLines,
-  placements: PadsGeometryPlacement[],
-): void => {
+interface AsciiPartDecalTerminal {
+  location: PadsGeometryPoint
+  pinNumber: string
+}
+
+interface AsciiPartDecalPadLayer {
+  sourceLevel: number
+  size: number
+  shapeCode: string
+  orientation: number
+  length: number
+  offset: number
+  hasUnsupportedTrailingGeometry: boolean
+}
+
+interface AsciiPartDecalPadStack {
+  pinNumber: string
+  layers: AsciiPartDecalPadLayer[]
+}
+
+interface AsciiPartDecalDefinition {
+  name: string
+  terminals: AsciiPartDecalTerminal[]
+  padStacks: Map<string, AsciiPartDecalPadStack>
+}
+
+const isPartDecalHeader = (lineTokens: string[]): boolean =>
+  lineTokens.length >= 9 &&
+  ["I", "M", "MM"].includes(lineTokens[1] ?? "") &&
+  lineTokens
+    .slice(2, 9)
+    .every((token) => parseFiniteNumber(token) !== undefined)
+
+const parsePartDecalPadLayer = (
+  lineTokens: string[],
+): AsciiPartDecalPadLayer | undefined => {
+  const sourceLevel = parseFiniteNumber(lineTokens[0])
+  const size = parseFiniteNumber(lineTokens[1])
+  const shapeCode = lineTokens[2]?.toUpperCase()
+  if (sourceLevel === undefined || size === undefined || !shapeCode) {
+    return undefined
+  }
+
+  const fingerShape = shapeCode === "RF" || shapeCode === "OF"
+  const orientation = fingerShape ? (parseFiniteNumber(lineTokens[3]) ?? 0) : 0
+  const length = fingerShape
+    ? Math.abs(parseFiniteNumber(lineTokens[4]) ?? size)
+    : Math.abs(size)
+  const offset = fingerShape ? (parseFiniteNumber(lineTokens[5]) ?? 0) : 0
+  const trailingValueStart = fingerShape ? 6 : 3
+  const hasUnsupportedTrailingGeometry = lineTokens
+    .slice(trailingValueStart)
+    .map(parseFiniteNumber)
+    .some((value) => value !== undefined && Math.abs(value) > 0)
+
+  return {
+    sourceLevel: Math.trunc(sourceLevel),
+    size: Math.abs(size),
+    shapeCode,
+    orientation,
+    length,
+    offset,
+    hasUnsupportedTrailingGeometry,
+  }
+}
+
+const parsePartDecalDefinitions = ({
+  sections,
+  diagnostics,
+}: {
+  sections: AsciiSectionLines[]
+  diagnostics: string[]
+}): Map<string, AsciiPartDecalDefinition> => {
+  const definitions = new Map<string, AsciiPartDecalDefinition>()
+  let malformedPadStackCount = 0
+
+  for (const section of sections) {
+    if (section.name !== "PARTDECAL") continue
+
+    let currentDefinition: AsciiPartDecalDefinition | undefined
+    let lineIndex = 0
+    while (lineIndex < section.lines.length) {
+      const lineTokens = tokenizeLine(section.lines[lineIndex] ?? "")
+      if (isPartDecalHeader(lineTokens)) {
+        const name = lineTokens[0]
+        if (name) {
+          currentDefinition = {
+            name,
+            terminals: [],
+            padStacks: new Map(),
+          }
+          definitions.set(name, currentDefinition)
+        }
+        lineIndex++
+        continue
+      }
+      if (!currentDefinition) {
+        lineIndex++
+        continue
+      }
+
+      const terminalMatch = /^T([+-]?(?:\d+(?:\.\d*)?|\.\d+))$/u.exec(
+        lineTokens[0] ?? "",
+      )
+      if (terminalMatch) {
+        const x = parseFiniteNumber(terminalMatch[1])
+        const y = parseFiniteNumber(lineTokens[1])
+        if (x !== undefined && y !== undefined) {
+          currentDefinition.terminals.push({
+            location: { x, y },
+            pinNumber:
+              lineTokens[4] ?? String(currentDefinition.terminals.length + 1),
+          })
+        }
+        lineIndex++
+        continue
+      }
+
+      if (lineTokens[0] !== "PAD") {
+        lineIndex++
+        continue
+      }
+
+      const pinNumber = lineTokens[1]
+      const stackLineCount = parseFiniteNumber(lineTokens[2])
+      if (!pinNumber || stackLineCount === undefined || stackLineCount < 1) {
+        lineIndex++
+        continue
+      }
+
+      const normalizedStackLineCount = Math.trunc(stackLineCount)
+      const layers: AsciiPartDecalPadLayer[] = []
+      let parsedStackLineCount = 0
+      lineIndex++
+      while (
+        lineIndex < section.lines.length &&
+        parsedStackLineCount < normalizedStackLineCount
+      ) {
+        const stackTokens = tokenizeLine(section.lines[lineIndex] ?? "")
+        lineIndex++
+        if (stackTokens.length === 0 || stackTokens[0]?.startsWith("*REMARK")) {
+          continue
+        }
+        parsedStackLineCount++
+        const layer = parsePartDecalPadLayer(stackTokens)
+        if (layer) layers.push(layer)
+      }
+      if (parsedStackLineCount !== normalizedStackLineCount) {
+        malformedPadStackCount++
+        continue
+      }
+      currentDefinition.padStacks.set(pinNumber, { pinNumber, layers })
+    }
+  }
+
+  if (malformedPadStackCount > 0) {
+    diagnostics.push(
+      `${malformedPadStackCount} ASCII part-decal pad stacks ended before all layer records were parsed`,
+    )
+  }
+  return definitions
+}
+
+const parsePartTypeDecals = (
+  sections: AsciiSectionLines[],
+): Map<string, string[]> => {
+  const decalNamesByPartType = new Map<string, string[]>()
+  for (const section of sections) {
+    if (section.name !== "PARTTYPE") continue
+    for (const lineText of section.lines) {
+      const lineTokens = tokenizeLine(lineText)
+      const partTypeName = lineTokens[0]
+      const decalList = lineTokens[1]
+      const hasExplicitUnits = ["I", "M", "MM"].includes(lineTokens[2] ?? "")
+      const hasLegacyHeader =
+        !hasExplicitUnits &&
+        parseFiniteNumber(lineTokens[2]) === undefined &&
+        parseFiniteNumber(lineTokens[3]) !== undefined
+      if (
+        !partTypeName ||
+        !decalList ||
+        (!hasExplicitUnits && !hasLegacyHeader)
+      ) {
+        continue
+      }
+      decalNamesByPartType.set(
+        partTypeName,
+        decalList.split(":").filter(Boolean),
+      )
+    }
+  }
+  return decalNamesByPartType
+}
+
+const resolvePlacementDecalName = ({
+  partTypeToken,
+  alternateIndex,
+  decalNamesByPartType,
+}: {
+  partTypeToken: string
+  alternateIndex: number | undefined
+  decalNamesByPartType: Map<string, string[]>
+}): string => {
+  const directDecalSeparator = partTypeToken.indexOf("@")
+  if (directDecalSeparator >= 0) {
+    return partTypeToken.slice(directDecalSeparator + 1) || partTypeToken
+  }
+  const alternatives = decalNamesByPartType.get(partTypeToken)
+  if (!alternatives || alternatives.length === 0) return partTypeToken
+  const selectedIndex =
+    alternateIndex !== undefined && alternateIndex >= 0
+      ? Math.trunc(alternateIndex)
+      : 0
+  return alternatives[selectedIndex] ?? alternatives[0] ?? partTypeToken
+}
+
+const addPartSectionGeometry = ({
+  section,
+  decalNamesByPartType,
+  placements,
+}: {
+  section: AsciiSectionLines
+  decalNamesByPartType: Map<string, string[]>
+  placements: PadsGeometryPlacement[]
+}): void => {
   for (const lineText of section.lines) {
     const lineTokens = tokenizeLine(lineText)
     const x = parseFiniteNumber(lineTokens[2])
@@ -943,11 +1165,144 @@ const addPartSectionGeometry = (
 
     placements.push({
       reference: lineTokens[0],
-      footprintName: lineTokens[1],
+      footprintName: resolvePlacementDecalName({
+        partTypeToken: lineTokens[1],
+        alternateIndex: parseFiniteNumber(lineTokens[7]),
+        decalNamesByPartType,
+      }),
       location: { x, y },
       rotation,
       bottomLayer: lineTokens[6] === "M",
     })
+  }
+}
+
+const normalizeRotation = (rotation: number): number => {
+  const normalizedRotation = rotation % 360
+  return normalizedRotation < 0 ? normalizedRotation + 360 : normalizedRotation
+}
+
+const transformDecalPoint = ({
+  point,
+  placement,
+}: {
+  point: PadsGeometryPoint
+  placement: PadsGeometryPlacement
+}): PadsGeometryPoint => {
+  const mirroredX = placement.bottomLayer ? -point.x : point.x
+  const rotationRadians = (placement.rotation * Math.PI) / 180
+  return {
+    x:
+      placement.location.x +
+      mirroredX * Math.cos(rotationRadians) -
+      point.y * Math.sin(rotationRadians),
+    y:
+      placement.location.y +
+      mirroredX * Math.sin(rotationRadians) +
+      point.y * Math.cos(rotationRadians),
+  }
+}
+
+const addPlacedPartPads = ({
+  placements,
+  definitions,
+  layerCount,
+  pads,
+  diagnostics,
+}: {
+  placements: PadsGeometryPlacement[]
+  definitions: Map<string, AsciiPartDecalDefinition>
+  layerCount: number
+  pads: PadsGeometryPad[]
+  diagnostics: string[]
+}): void => {
+  let unresolvedDecalCount = 0
+  let missingPadStackCount = 0
+  let unsupportedPadCount = 0
+
+  for (const placement of placements) {
+    const decalName = placement.footprintName
+    const definition = decalName ? definitions.get(decalName) : undefined
+    if (!decalName || !definition) {
+      unresolvedDecalCount++
+      continue
+    }
+
+    const mountedLayer = placement.bottomLayer ? layerCount : 1
+    for (const terminal of definition.terminals) {
+      const padStack =
+        definition.padStacks.get(terminal.pinNumber) ??
+        definition.padStacks.get("0")
+      if (!padStack) {
+        missingPadStackCount++
+        continue
+      }
+      const padLayer =
+        padStack.layers.find(
+          (candidateLayer) => candidateLayer.sourceLevel === mountedLayer,
+        ) ??
+        padStack.layers.find(
+          (candidateLayer) => candidateLayer.sourceLevel === -2,
+        )
+      if (!padLayer || padLayer.size <= 0) continue
+
+      const shape =
+        padLayer.shapeCode === "R"
+          ? "circle"
+          : padLayer.shapeCode === "S"
+            ? "square"
+            : padLayer.shapeCode === "RF"
+              ? "rect"
+              : padLayer.shapeCode === "OF"
+                ? "oval"
+                : undefined
+      if (!shape || padLayer.hasUnsupportedTrailingGeometry) {
+        unsupportedPadCount++
+        continue
+      }
+
+      const padRotation = placement.bottomLayer
+        ? 180 - padLayer.orientation
+        : padLayer.orientation
+      const padRotationRadians = (padLayer.orientation * Math.PI) / 180
+      const localPadCenter = {
+        x: terminal.location.x + padLayer.offset * Math.cos(padRotationRadians),
+        y: terminal.location.y + padLayer.offset * Math.sin(padRotationRadians),
+      }
+      pads.push({
+        center: transformDecalPoint({
+          point: localPadCenter,
+          placement,
+        }),
+        width:
+          padLayer.shapeCode === "RF" || padLayer.shapeCode === "OF"
+            ? padLayer.length
+            : padLayer.size,
+        height: padLayer.size,
+        shape,
+        rotation: normalizeRotation(placement.rotation + padRotation),
+        layer: mountedLayer,
+        reference: placement.reference,
+        pinNumber: terminal.pinNumber,
+        decalName,
+      })
+    }
+  }
+
+  if (unresolvedDecalCount > 0) {
+    diagnostics.push(
+      `${unresolvedDecalCount} ASCII part placements have no decoded decal definition`,
+    )
+  }
+  if (missingPadStackCount > 0) {
+    diagnostics.push(
+      `${missingPadStackCount} ASCII decal terminals have no matching pad stack`,
+    )
+  }
+  if (unsupportedPadCount > 0) {
+    diagnostics.push(
+      `${unsupportedPadCount} ASCII placed pads use drilled, rounded, or unsupported pad geometry`,
+    )
   }
 }
 
@@ -993,10 +1348,16 @@ export const extractAsciiBoardGeometry = (
   const layerCount = parseLayerCount(sections, layers)
   const diagnostics: string[] = []
   const viaDefinitions = parseViaDefinitions({ sections, diagnostics })
+  const partDecalDefinitions = parsePartDecalDefinitions({
+    sections,
+    diagnostics,
+  })
+  const decalNamesByPartType = parsePartTypeDecals(sections)
   const paths: PadsGeometryPath[] = []
   const circles: PadsGeometryCircle[] = []
   const texts: PadsGeometryText[] = []
   const placements: PadsGeometryPlacement[] = []
+  const pads: PadsGeometryPad[] = []
   const unverifiedViaLocations: PadsGeometryPoint[] = []
 
   for (const section of sections) {
@@ -1015,9 +1376,20 @@ export const extractAsciiBoardGeometry = (
     } else if (section.name === "TEXT") {
       addTextSectionGeometry(section, texts)
     } else if (section.name === "PART") {
-      addPartSectionGeometry(section, placements)
+      addPartSectionGeometry({
+        section,
+        decalNamesByPartType,
+        placements,
+      })
     }
   }
+  addPlacedPartPads({
+    placements,
+    definitions: partDecalDefinitions,
+    layerCount,
+    pads,
+    diagnostics,
+  })
 
   return {
     sourceFormat: "ascii",
@@ -1028,6 +1400,7 @@ export const extractAsciiBoardGeometry = (
     circles,
     texts,
     placements,
+    pads,
     unassignedVertices: [],
     unverifiedConnections: [],
     unverifiedViaLocations,

@@ -59,8 +59,10 @@ Y-axis flip, and named fabrication-layer groups such as `F_Cu`, `B_Cu`,
 `F_Silkscreen`, and `Edge_Cuts`. Copper layers use the same red/blue/internal
 layer palette as tscircuit's Gerber snapshots. Resolved ASCII vias preserve
 distinct top, inner, bottom, and specific-layer round or square pad apertures,
-including partial layer spans. Experimental native-binary route and via
-candidates are withheld from fabrication layers.
+including partial layer spans. Basic ASCII part-decal terminals and round,
+square, rectangular-finger, and oval-finger surface pads are resolved through
+part types and transformed onto top or bottom copper. Experimental native-binary
+route and via candidates are withheld from fabrication layers.
 
 Parser diagnostics and decoded counts are retained in SVG metadata. Optional
 binary section and unresolved-vertex overlays can be enabled explicitly:

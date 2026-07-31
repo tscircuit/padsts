@@ -23,9 +23,11 @@ test.skipIf(!isAvailable)(
     const viaPads = vias.flatMap((via) => via.copperPads ?? [])
     expect(viaPads).toHaveLength(6_444)
     expect(viaPads.filter((pad) => pad.shape === "square")).toHaveLength(2_730)
+    expect(geometry.pads).toHaveLength(1_235)
     expectGerberStyleSvg(svg)
     expect(svg).toContain('data-kind="outline"')
     expect(svg).toContain('data-kind="placement"')
+    expect(svg).toContain('data-kind="component-pad"')
     expect(svg).toContain('data-gerber-layer="F_Cu"')
     await expect(svg).toMatchSvgSnapshot(import.meta.path)
     await expectVisualSnapshotViews({

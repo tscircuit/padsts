@@ -293,4 +293,84 @@ describe("PADS ASCII", () => {
       },
     ])
   })
+
+  test("resolves and transforms basic placed part-decal pads", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-MILS! DESIGN DATABASE ASCII FILE 1.0",
+      "*PCB*",
+      "MAXIMUMLAYER 2",
+      "*PARTDECAL*",
+      "TEST_DECAL I 0 0 0 2 1 0 0",
+      "T-10 0 -10 0 1",
+      "T10 0 10 0 2",
+      "PAD 0 3",
+      "-2 8 RF 0 12 2 0 0 N",
+      "-1 0 R",
+      "0 0 R",
+      "*PARTTYPE*",
+      "TEST_TYPE TEST_DECAL I UND 0 0 0 0 Y",
+      "*PART*",
+      "U1 TEST_TYPE 100 200 90 U N 0 -1 0 -1 0",
+      "U2 TEST_TYPE 300 200 0 U M 0 -1 0 -1 0",
+      "*END*",
+      "",
+    ].join("\n")
+    const document = parsePadsAscii(sourceText)
+    const geometry = extractPadsBoardGeometry(document)
+    const svg = generateSvgFromPads(document)
+
+    expect(
+      geometry.placements.map((placement) => placement.footprintName),
+    ).toEqual(["TEST_DECAL", "TEST_DECAL"])
+    expect(geometry.pads).toEqual([
+      {
+        center: { x: 100, y: 192 },
+        width: 12,
+        height: 8,
+        shape: "rect",
+        rotation: 90,
+        layer: 1,
+        reference: "U1",
+        pinNumber: "1",
+        decalName: "TEST_DECAL",
+      },
+      {
+        center: { x: 100, y: 212 },
+        width: 12,
+        height: 8,
+        shape: "rect",
+        rotation: 90,
+        layer: 1,
+        reference: "U1",
+        pinNumber: "2",
+        decalName: "TEST_DECAL",
+      },
+      {
+        center: { x: 308, y: 200 },
+        width: 12,
+        height: 8,
+        shape: "rect",
+        rotation: 180,
+        layer: 2,
+        reference: "U2",
+        pinNumber: "1",
+        decalName: "TEST_DECAL",
+      },
+      {
+        center: { x: 288, y: 200 },
+        width: 12,
+        height: 8,
+        shape: "rect",
+        rotation: 180,
+        layer: 2,
+        reference: "U2",
+        pinNumber: "2",
+        decalName: "TEST_DECAL",
+      },
+    ])
+    expect(geometry.diagnostics).toEqual([])
+    expect(svg.match(/data-kind="component-pad"/gu)).toHaveLength(4)
+    expect(svg).toContain('id="pads-F_Cu-component-pads"')
+    expect(svg).toContain('id="pads-B_Cu-component-pads"')
+  })
 })

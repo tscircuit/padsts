@@ -3,6 +3,7 @@ import {
   type PadsBinarySectionSummary,
   type PadsBoardGeometry,
   type PadsGeometryCircle,
+  type PadsGeometryPad,
   type PadsGeometryPath,
   type PadsGeometryPathSegment,
   type PadsGeometryPoint,
@@ -204,6 +205,21 @@ const getPreferredBoundPoints = (
       {
         x: circle.center.x + circle.radius,
         y: circle.center.y + circle.radius,
+      },
+    )
+  }
+  for (const pad of geometry.pads) {
+    if (!isFinitePoint(pad.center)) continue
+    const halfExtent = Math.hypot(pad.width, pad.height) / 2
+    if (!Number.isFinite(halfExtent) || halfExtent <= 0) continue
+    physicalPoints.push(
+      {
+        x: pad.center.x - halfExtent,
+        y: pad.center.y - halfExtent,
+      },
+      {
+        x: pad.center.x + halfExtent,
+        y: pad.center.y + halfExtent,
       },
     )
   }
@@ -707,6 +723,60 @@ const renderCopperCircles = ({
     .join("")
 }
 
+const getPadMetadataAttributes = (pad: PadsGeometryPad): string =>
+  [
+    'data-kind="component-pad"',
+    `data-pads-layer="${formatNumber(pad.layer)}"`,
+    `data-reference="${escapeXml(pad.reference)}"`,
+    `data-pin="${escapeXml(pad.pinNumber)}"`,
+    `data-decal="${escapeXml(pad.decalName)}"`,
+  ].join(" ")
+
+const renderFootprintPads = (context: RenderContext): string => {
+  const padsByLayer = new Map<string, PadsGeometryPad[]>()
+  for (const pad of context.geometry.pads) {
+    if (
+      !isFinitePoint(pad.center) ||
+      !Number.isFinite(pad.width) ||
+      !Number.isFinite(pad.height) ||
+      pad.width <= 0 ||
+      pad.height <= 0
+    ) {
+      continue
+    }
+    const layerName = getGerberCopperLayerName({
+      geometry: context.geometry,
+      layer: pad.layer,
+    })
+    if (!shouldRenderLayer(context, layerName)) continue
+    const layerPads = padsByLayer.get(layerName) ?? []
+    layerPads.push(pad)
+    padsByLayer.set(layerName, layerPads)
+  }
+
+  return [...padsByLayer.entries()]
+    .map(([layerName, pads]) => {
+      const color = getLayerColor({
+        layerName,
+        layerColors: context.layerColors,
+      })
+      const padElements = pads
+        .map((pad) => {
+          const attributes = getPadMetadataAttributes(pad)
+          if (pad.shape === "circle") {
+            return `<circle ${attributes} cx="${formatNumber(pad.center.x)}" cy="${formatNumber(pad.center.y)}" r="${formatNumber(Math.min(pad.width, pad.height) / 2)}"/>`
+          }
+
+          const cornerRadius =
+            pad.shape === "oval" ? Math.min(pad.width, pad.height) / 2 : 0
+          return `<rect ${attributes} x="${formatNumber(-pad.width / 2)}" y="${formatNumber(-pad.height / 2)}" width="${formatNumber(pad.width)}" height="${formatNumber(pad.height)}"${cornerRadius > 0 ? ` rx="${formatNumber(cornerRadius)}" ry="${formatNumber(cornerRadius)}"` : ""} transform="translate(${formatNumber(pad.center.x)} ${formatNumber(pad.center.y)}) rotate(${formatNumber(pad.rotation)})"/>`
+        })
+        .join("")
+      return `<g id="pads-${layerName}-component-pads" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="none"${context.boardClipAttribute}>${padElements}</g>`
+    })
+    .join("")
+}
+
 const renderDrills = ({ context }: { context: RenderContext }): string => {
   if (!shouldRenderLayer(context, "Drill")) return ""
   const visibleCopperLayers = new Set<number>()
@@ -1087,6 +1157,7 @@ export const generateSvgFromPadsGeometry = (
     counts: {
       paths: geometry.paths.length,
       circles: geometry.circles.length,
+      pads: geometry.pads.length,
       placements: geometry.placements.length,
       texts: geometry.texts.length,
       unassignedVertices: geometry.unassignedVertices.length,
@@ -1115,6 +1186,7 @@ export const generateSvgFromPadsGeometry = (
     `<g id="pads-FR4"${boardClipAttribute}><rect x="${formatNumber(bounds.minimumX)}" y="${formatNumber(bounds.minimumY)}" width="${formatNumber(boundsWidth)}" height="${formatNumber(boundsHeight)}" fill="${escapeXml(boardColor)}"/></g>`,
     renderCopperPaths(context),
     renderCopperCircles({ context, apertureByKey }),
+    renderFootprintPads(context),
     renderDrills({ context }),
     renderDrawingGeometry(context),
     renderKeepouts(context),
