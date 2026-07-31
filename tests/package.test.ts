@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test"
 
 test("the built package exposes parser, inspection, conversion, and SVG APIs", async () => {
-  const packageApi = await import("../dist/index.js")
+  // Keep the build artifact out of TypeScript's source graph. `bun run check`
+  // typechecks a clean checkout before building, then this runtime import
+  // verifies the generated package after the build step.
+  const packageEntry = "../dist/index.js"
+  const packageApi = await import(packageEntry)
 
   expect(packageApi).toMatchObject({
     parsePads: expect.any(Function),
