@@ -6,6 +6,7 @@ import {
   type PadsGeometryPath,
   type PadsGeometryPathSegment,
   type PadsGeometryPoint,
+  type PadsGeometryViaPad,
 } from "../geometry"
 import { type PadsDocument, parsePads } from "../parse-pads"
 
@@ -501,31 +502,32 @@ const getViaApertures = (
   minimumFeatureSize: number,
 ): {
   apertures: ViaAperture[]
-  apertureByCircle: Map<PadsGeometryCircle, ViaAperture>
+  apertureByKey: Map<string, ViaAperture>
 } => {
   const apertureByKey = new Map<string, ViaAperture>()
-  const apertureByCircle = new Map<PadsGeometryCircle, ViaAperture>()
 
   for (const circle of geometry.circles) {
     if (circle.kind !== "via") continue
-    const radius = Math.max(Math.abs(circle.radius), minimumFeatureSize * 1.8)
     const drillRadius = getViaDrillRadius(circle, minimumFeatureSize)
-    const shape = circle.shape ?? "circle"
-    const apertureKey = `${shape}:${formatNumber(radius)}:${formatNumber(drillRadius)}`
-    let aperture = apertureByKey.get(apertureKey)
-    if (!aperture) {
-      aperture = {
-        id: `pads-via-aperture-${apertureByKey.size + 1}`,
+    for (const pad of getViaCopperPads({ circle, geometry })) {
+      const radius = Math.max(Math.abs(pad.radius), minimumFeatureSize * 1.8)
+      const apertureKey = getViaApertureKey({
+        shape: pad.shape,
         radius,
         drillRadius,
-        shape,
+      })
+      if (!apertureByKey.has(apertureKey)) {
+        apertureByKey.set(apertureKey, {
+          id: `pads-via-aperture-${apertureByKey.size + 1}`,
+          radius,
+          drillRadius,
+          shape: pad.shape,
+        })
       }
-      apertureByKey.set(apertureKey, aperture)
     }
-    apertureByCircle.set(circle, aperture)
   }
 
-  return { apertures: [...apertureByKey.values()], apertureByCircle }
+  return { apertures: [...apertureByKey.values()], apertureByKey }
 }
 
 const renderApertureDefinitions = (apertures: ViaAperture[]): string =>
@@ -537,13 +539,24 @@ const renderApertureDefinitions = (apertures: ViaAperture[]): string =>
     )
     .join("")
 
-const getCircleCopperLayers = ({
+const getViaCopperPads = ({
   circle,
   geometry,
 }: {
   circle: PadsGeometryCircle
   geometry: PadsBoardGeometry
-}): (number | string | undefined)[] => {
+}): PadsGeometryViaPad[] => {
+  if (circle.copperPads !== undefined) {
+    return circle.copperPads.filter(
+      (pad) =>
+        Number.isFinite(pad.layer) &&
+        pad.layer >= 1 &&
+        pad.layer <= geometry.layerCount &&
+        Number.isFinite(pad.radius) &&
+        pad.radius > 0,
+    )
+  }
+
   if (
     circle.kind !== "via" ||
     circle.startLayer === undefined ||
@@ -551,7 +564,17 @@ const getCircleCopperLayers = ({
     !Number.isFinite(circle.startLayer) ||
     !Number.isFinite(circle.endLayer)
   ) {
-    return [circle.layer]
+    const fallbackLayer =
+      typeof circle.layer === "number" && Number.isFinite(circle.layer)
+        ? Math.trunc(circle.layer)
+        : 1
+    return [
+      {
+        layer: fallbackLayer,
+        radius: circle.radius,
+        shape: circle.shape ?? "circle",
+      },
+    ]
   }
 
   const firstLayer = Math.max(
@@ -562,61 +585,113 @@ const getCircleCopperLayers = ({
     geometry.layerCount,
     Math.max(Math.trunc(circle.startLayer), Math.trunc(circle.endLayer)),
   )
-  const layers: number[] = []
-  for (let layer = firstLayer; layer <= lastLayer; layer++) layers.push(layer)
-  return layers.length > 0 ? layers : [circle.layer]
+  const pads: PadsGeometryViaPad[] = []
+  for (let layer = firstLayer; layer <= lastLayer; layer++) {
+    pads.push({
+      layer,
+      radius: circle.radius,
+      shape: circle.shape ?? "circle",
+    })
+  }
+  return pads.length > 0
+    ? pads
+    : [
+        {
+          layer:
+            typeof circle.layer === "number" && Number.isFinite(circle.layer)
+              ? Math.trunc(circle.layer)
+              : 1,
+          radius: circle.radius,
+          shape: circle.shape ?? "circle",
+        },
+      ]
+}
+
+const getViaApertureKey = ({
+  shape,
+  radius,
+  drillRadius,
+}: {
+  shape: PadsGeometryViaPad["shape"]
+  radius: number
+  drillRadius: number
+}): string => `${shape}:${formatNumber(radius)}:${formatNumber(drillRadius)}`
+
+interface CopperCircleFlash {
+  circle: PadsGeometryCircle
+  viaPad?: PadsGeometryViaPad
+  aperture?: ViaAperture
 }
 
 const renderCopperCircles = ({
   context,
-  apertureByCircle,
+  apertureByKey,
 }: {
   context: RenderContext
-  apertureByCircle: Map<PadsGeometryCircle, ViaAperture>
+  apertureByKey: Map<string, ViaAperture>
 }): string => {
-  const circlesByLayer = new Map<string, PadsGeometryCircle[]>()
+  const flashesByLayer = new Map<string, CopperCircleFlash[]>()
   for (const circle of context.geometry.circles) {
     if (circle.kind !== "via" && circle.kind !== "copper") continue
-    const candidateLayerNames = [
-      ...new Set(
-        getCircleCopperLayers({
-          circle,
-          geometry: context.geometry,
-        }).map((layer) =>
-          getGerberCopperLayerName({
-            geometry: context.geometry,
-            layer,
-          }),
-        ),
-      ),
-    ]
-    const layerName = candidateLayerNames.find((candidateLayerName) =>
-      shouldRenderLayer(context, candidateLayerName),
-    )
-    if (!layerName) continue
-    const layerCircles = circlesByLayer.get(layerName) ?? []
-    layerCircles.push(circle)
-    circlesByLayer.set(layerName, layerCircles)
+    if (circle.kind === "copper") {
+      const layerName = getGerberCopperLayerName({
+        geometry: context.geometry,
+        layer: circle.layer,
+      })
+      if (!shouldRenderLayer(context, layerName)) continue
+      const layerFlashes = flashesByLayer.get(layerName) ?? []
+      layerFlashes.push({ circle })
+      flashesByLayer.set(layerName, layerFlashes)
+      continue
+    }
+
+    const renderedApertureIds = new Set<string>()
+    const drillRadius = getViaDrillRadius(circle, context.minimumFeatureSize)
+    for (const viaPad of getViaCopperPads({
+      circle,
+      geometry: context.geometry,
+    })) {
+      const layerName = getGerberCopperLayerName({
+        geometry: context.geometry,
+        layer: viaPad.layer,
+      })
+      if (!shouldRenderLayer(context, layerName)) continue
+      const radius = Math.max(
+        Math.abs(viaPad.radius),
+        context.minimumFeatureSize * 1.8,
+      )
+      const aperture = apertureByKey.get(
+        getViaApertureKey({
+          shape: viaPad.shape,
+          radius,
+          drillRadius,
+        }),
+      )
+      if (!aperture || renderedApertureIds.has(aperture.id)) continue
+      renderedApertureIds.add(aperture.id)
+      const layerFlashes = flashesByLayer.get(layerName) ?? []
+      layerFlashes.push({ circle, viaPad, aperture })
+      flashesByLayer.set(layerName, layerFlashes)
+    }
   }
 
-  return [...circlesByLayer.entries()]
-    .map(([layerName, circles]) => {
+  return [...flashesByLayer.entries()]
+    .map(([layerName, flashes]) => {
       if (!shouldRenderLayer(context, layerName)) return ""
       const color = getLayerColor({
         layerName,
         layerColors: context.layerColors,
       })
-      const circleElements = circles
-        .map((circle) => {
+      const circleElements = flashes
+        .map(({ circle, viaPad, aperture }) => {
           const attributes = getMetadataAttributes(circle)
           if (circle.kind === "via") {
-            const aperture = apertureByCircle.get(circle)
-            if (!aperture) return ""
+            if (!aperture || !viaPad) return ""
             const layerSpanAttributes =
               circle.startLayer !== undefined && circle.endLayer !== undefined
                 ? ` data-start-layer="${formatNumber(circle.startLayer)}" data-end-layer="${formatNumber(circle.endLayer)}"`
                 : ""
-            return `<use ${attributes}${layerSpanAttributes} xlink:href="#${aperture.id}" href="#${aperture.id}" x="${formatNumber(circle.center.x)}" y="${formatNumber(circle.center.y)}"/>`
+            return `<use ${attributes}${layerSpanAttributes} data-pad-layer="${formatNumber(viaPad.layer)}" xlink:href="#${aperture.id}" href="#${aperture.id}" x="${formatNumber(circle.center.x)}" y="${formatNumber(circle.center.y)}"/>`
           }
 
           const radius = Math.max(
@@ -632,20 +707,56 @@ const renderCopperCircles = ({
     .join("")
 }
 
-const renderDrills = ({
-  context,
-  apertureByCircle,
-}: {
-  context: RenderContext
-  apertureByCircle: Map<PadsGeometryCircle, ViaAperture>
-}): string => {
+const renderDrills = ({ context }: { context: RenderContext }): string => {
   if (!shouldRenderLayer(context, "Drill")) return ""
+  const visibleCopperLayers = new Set<number>()
+  if (context.visibleGerberLayers) {
+    for (let layer = 1; layer <= context.geometry.layerCount; layer++) {
+      const layerName = getGerberCopperLayerName({
+        geometry: context.geometry,
+        layer,
+      })
+      if (context.visibleGerberLayers.has(layerName)) {
+        visibleCopperLayers.add(layer)
+      }
+    }
+  }
+  const filterDrillsByCopperLayer =
+    context.visibleGerberLayers !== undefined && visibleCopperLayers.size > 0
   const drillElements = context.geometry.circles
     .filter((circle) => circle.kind === "via")
+    .filter((circle) => {
+      if (!filterDrillsByCopperLayer) return true
+      if (
+        circle.startLayer !== undefined &&
+        circle.endLayer !== undefined &&
+        Number.isFinite(circle.startLayer) &&
+        Number.isFinite(circle.endLayer)
+      ) {
+        const firstLayer = Math.min(
+          Math.trunc(circle.startLayer),
+          Math.trunc(circle.endLayer),
+        )
+        const lastLayer = Math.max(
+          Math.trunc(circle.startLayer),
+          Math.trunc(circle.endLayer),
+        )
+        return [...visibleCopperLayers].some(
+          (layer) => layer >= firstLayer && layer <= lastLayer,
+        )
+      }
+      return getViaCopperPads({
+        circle,
+        geometry: context.geometry,
+      }).some((pad) => visibleCopperLayers.has(pad.layer))
+    })
     .map((circle) => {
-      const aperture = apertureByCircle.get(circle)
-      if (!aperture) return ""
-      return `<circle data-kind="drill" cx="${formatNumber(circle.center.x)}" cy="${formatNumber(circle.center.y)}" r="${formatNumber(aperture.drillRadius)}"/>`
+      const drillRadius = getViaDrillRadius(circle, context.minimumFeatureSize)
+      const layerSpanAttributes =
+        circle.startLayer !== undefined && circle.endLayer !== undefined
+          ? ` data-start-layer="${formatNumber(circle.startLayer)}" data-end-layer="${formatNumber(circle.endLayer)}"`
+          : ""
+      return `<circle data-kind="drill"${layerSpanAttributes} cx="${formatNumber(circle.center.x)}" cy="${formatNumber(circle.center.y)}" r="${formatNumber(drillRadius)}"/>`
     })
     .join("")
 
@@ -946,7 +1057,7 @@ export const generateSvgFromPadsGeometry = (
   )
   const boardClipAttribute =
     outlinePaths.length > 0 ? ' clip-path="url(#pads-board-outline)"' : ""
-  const { apertures, apertureByCircle } = getViaApertures(
+  const { apertures, apertureByKey } = getViaApertures(
     geometry,
     minimumFeatureSize,
   )
@@ -1003,8 +1114,8 @@ export const generateSvgFromPadsGeometry = (
     '<g transform="scale(1,-1)">',
     `<g id="pads-FR4"${boardClipAttribute}><rect x="${formatNumber(bounds.minimumX)}" y="${formatNumber(bounds.minimumY)}" width="${formatNumber(boundsWidth)}" height="${formatNumber(boundsHeight)}" fill="${escapeXml(boardColor)}"/></g>`,
     renderCopperPaths(context),
-    renderCopperCircles({ context, apertureByCircle }),
-    renderDrills({ context, apertureByCircle }),
+    renderCopperCircles({ context, apertureByKey }),
+    renderDrills({ context }),
     renderDrawingGeometry(context),
     renderKeepouts(context),
     options.showPlacements === false ? "" : renderPlacements(context),

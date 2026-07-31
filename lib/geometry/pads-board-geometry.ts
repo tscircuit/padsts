@@ -45,12 +45,19 @@ export interface PadsGeometryPath {
 
 export type PadsGeometryCircleKind = "via" | "copper" | "keepout" | "drawing"
 
+export interface PadsGeometryViaPad {
+  layer: number
+  radius: number
+  shape: "circle" | "square"
+}
+
 export interface PadsGeometryCircle {
   kind: PadsGeometryCircleKind
   center: PadsGeometryPoint
   radius: number
   drillRadius?: number
   shape?: "circle" | "square"
+  copperPads?: PadsGeometryViaPad[]
   startLayer?: number
   endLayer?: number
   width: number

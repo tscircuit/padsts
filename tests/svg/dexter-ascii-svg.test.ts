@@ -20,6 +20,8 @@ test.skipIf(!isAvailable)(
     expect(vias).toHaveLength(796)
     expect(vias.every((via) => via.drillRadius !== undefined)).toBe(true)
     expect(vias.every((via) => via.name === "STANDARDVIA")).toBe(true)
+    expect(vias.every((via) => via.copperPads?.length === 8)).toBe(true)
+    expect(vias.flatMap((via) => via.copperPads ?? [])).toHaveLength(6_368)
     expectGerberStyleSvg(svg)
     expect(svg).toContain('data-kind="outline"')
     expect(svg).toContain('data-kind="placement"')

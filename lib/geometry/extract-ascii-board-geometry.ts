@@ -10,6 +10,7 @@ import type {
   PadsGeometryPlacement,
   PadsGeometryPoint,
   PadsGeometryText,
+  PadsGeometryViaPad,
 } from "./pads-board-geometry"
 
 interface AsciiSectionLines {
@@ -349,10 +350,17 @@ const addLineSectionGeometry = ({
 interface AsciiViaDefinition {
   name: string
   drillRadius: number
-  radius: number
-  shape: "circle" | "square"
+  pads: AsciiViaPadDefinition[]
   startLayer?: number
   endLayer?: number
+}
+
+interface AsciiViaPadDefinition {
+  sourceLevel: number
+  radius: number
+  shape?: "circle" | "square"
+  shapeCode: string
+  kind: "conductive" | "negative" | "unsupported"
 }
 
 const parseViaDefinitions = ({
@@ -390,10 +398,7 @@ const parseViaDefinitions = ({
       const normalizedStackLineCount = Math.trunc(stackLineCount)
       const startLayer = parseFiniteNumber(headerTokens[3])
       const endLayer = parseFiniteNumber(headerTokens[4])
-      const padCandidates: {
-        radius: number
-        shape: "circle" | "square"
-      }[] = []
+      const pads: AsciiViaPadDefinition[] = []
       lineIndex++
 
       let parsedStackLineCount = 0
@@ -408,34 +413,48 @@ const parseViaDefinitions = ({
         }
         parsedStackLineCount++
 
+        const sourceLevel = parseFiniteNumber(stackTokens[0])
         const diameter = parseFiniteNumber(stackTokens[1])
         const shapeCode = stackTokens[2]?.toUpperCase()
-        if (diameter === undefined || diameter <= 0 || !shapeCode) continue
-        if (shapeCode === "R" || shapeCode === "S") {
-          padCandidates.push({
-            radius: diameter / 2,
-            shape: shapeCode === "S" ? "square" : "circle",
-          })
+        if (
+          sourceLevel === undefined ||
+          diameter === undefined ||
+          diameter <= 0 ||
+          !shapeCode
+        ) {
+          continue
         }
+        pads.push({
+          sourceLevel: Math.trunc(sourceLevel),
+          radius: diameter / 2,
+          shape:
+            shapeCode === "R"
+              ? "circle"
+              : shapeCode === "S"
+                ? "square"
+                : undefined,
+          shapeCode,
+          kind:
+            shapeCode === "R" || shapeCode === "S"
+              ? "conductive"
+              : shapeCode === "RA" || shapeCode === "SA"
+                ? "negative"
+                : "unsupported",
+        })
       }
 
-      const largestPad = padCandidates.sort(
-        (firstPad, secondPad) => secondPad.radius - firstPad.radius,
-      )[0]
-      if (!largestPad) {
-        unsupportedPadShapeCount++
-        continue
-      }
       if (parsedStackLineCount !== normalizedStackLineCount) {
         malformedDefinitionCount++
         continue
+      }
+      if (!pads.some((pad) => pad.kind === "conductive")) {
+        unsupportedPadShapeCount++
       }
 
       definitions.set(name, {
         name,
         drillRadius: drillDiameter / 2,
-        radius: largestPad.radius,
-        shape: largestPad.shape,
+        pads,
         ...(startLayer !== undefined && endLayer !== undefined
           ? {
               startLayer: Math.trunc(startLayer),
@@ -457,6 +476,79 @@ const parseViaDefinitions = ({
     )
   }
   return definitions
+}
+
+const resolveViaPadStack = ({
+  definition,
+  requestedStartLayer,
+  requestedEndLayer,
+  layerCount,
+}: {
+  definition: AsciiViaDefinition
+  requestedStartLayer?: number
+  requestedEndLayer?: number
+  layerCount: number
+}): {
+  startLayer: number
+  endLayer: number
+  copperPads: PadsGeometryViaPad[]
+  unsupportedShapeCodes: string[]
+} => {
+  const rawStartLayer = requestedStartLayer ?? definition.startLayer ?? 1
+  const rawEndLayer = requestedEndLayer ?? definition.endLayer ?? layerCount
+  const startLayer = Math.max(
+    1,
+    Math.min(
+      layerCount,
+      Math.min(Math.trunc(rawStartLayer), Math.trunc(rawEndLayer)),
+    ),
+  )
+  const endLayer = Math.max(
+    1,
+    Math.min(
+      layerCount,
+      Math.max(Math.trunc(rawStartLayer), Math.trunc(rawEndLayer)),
+    ),
+  )
+  const padBySpecificLayer = new Map<number, AsciiViaPadDefinition>()
+  let topPad: AsciiViaPadDefinition | undefined
+  let innerPad: AsciiViaPadDefinition | undefined
+  let bottomPad: AsciiViaPadDefinition | undefined
+  for (const pad of definition.pads) {
+    if (pad.sourceLevel === -2) topPad = pad
+    else if (pad.sourceLevel === -1) innerPad = pad
+    else if (pad.sourceLevel === 0) bottomPad = pad
+    else if (pad.sourceLevel > 0) {
+      padBySpecificLayer.set(pad.sourceLevel, pad)
+    }
+  }
+
+  const copperPads: PadsGeometryViaPad[] = []
+  const unsupportedShapeCodes: string[] = []
+  for (let layer = startLayer; layer <= endLayer; layer++) {
+    const genericPad =
+      startLayer === endLayer
+        ? (topPad ?? bottomPad ?? innerPad)
+        : layer === startLayer
+          ? topPad
+          : layer === endLayer
+            ? bottomPad
+            : innerPad
+    const pad = padBySpecificLayer.get(layer) ?? genericPad
+    if (!pad) continue
+    if (pad.kind === "unsupported") {
+      unsupportedShapeCodes.push(pad.shapeCode)
+      continue
+    }
+    if (pad.kind === "negative" || !pad.shape) continue
+    copperPads.push({
+      layer,
+      radius: pad.radius,
+      shape: pad.shape,
+    })
+  }
+
+  return { startLayer, endLayer, copperPads, unsupportedShapeCodes }
 }
 
 const addRouteSectionGeometry = ({
@@ -490,6 +582,8 @@ const addRouteSectionGeometry = ({
   let skippedNonCopperSegmentCount = 0
   let malformedArcCount = 0
   const unresolvedViaDefinitionCounts = new Map<string, number>()
+  const unresolvedViaPadCounts = new Map<string, number>()
+  const unsupportedViaPadShapeCounts = new Map<string, number>()
   let previousPoint: RoutePoint | undefined
   let pendingArc: PendingRouteArc | undefined
 
@@ -514,18 +608,50 @@ const addRouteSectionGeometry = ({
       return
     }
 
-    const resolvedStartLayer = startLayer ?? definition.startLayer ?? 1
-    const resolvedEndLayer = endLayer ?? definition.endLayer ?? layerCount
+    const resolvedPadStack = resolveViaPadStack({
+      definition,
+      requestedStartLayer: startLayer,
+      requestedEndLayer: endLayer,
+      layerCount,
+    })
+    for (const shapeCode of resolvedPadStack.unsupportedShapeCodes) {
+      unsupportedViaPadShapeCounts.set(
+        shapeCode,
+        (unsupportedViaPadShapeCounts.get(shapeCode) ?? 0) + 1,
+      )
+    }
+    const largestPad = resolvedPadStack.copperPads.reduce<
+      PadsGeometryViaPad | undefined
+    >(
+      (largestCandidate, candidate) =>
+        !largestCandidate || candidate.radius > largestCandidate.radius
+          ? candidate
+          : largestCandidate,
+      undefined,
+    )
+    if (!largestPad) {
+      unverifiedViaLocations.push(location)
+      unresolvedViaPadCounts.set(
+        name,
+        (unresolvedViaPadCounts.get(name) ?? 0) + 1,
+      )
+      return
+    }
+    const startPad =
+      resolvedPadStack.copperPads.find(
+        (pad) => pad.layer === resolvedPadStack.startLayer,
+      ) ?? largestPad
     circles.push({
       kind: "via",
       center: location,
-      radius: definition.radius,
+      radius: largestPad.radius,
       drillRadius: definition.drillRadius,
-      shape: definition.shape,
-      startLayer: resolvedStartLayer,
-      endLayer: resolvedEndLayer,
-      width: Math.max(definition.radius - definition.drillRadius, 0),
-      layer: resolvedStartLayer,
+      shape: startPad.shape,
+      copperPads: resolvedPadStack.copperPads,
+      startLayer: resolvedPadStack.startLayer,
+      endLayer: resolvedPadStack.endLayer,
+      width: Math.max(largestPad.radius - definition.drillRadius, 0),
+      layer: resolvedPadStack.startLayer,
       name,
       netName,
     })
@@ -732,6 +858,23 @@ const addRouteSectionGeometry = ({
     ].reduce((totalCount, definitionCount) => totalCount + definitionCount, 0)
     diagnostics.push(
       `${unresolvedViaCount} ASCII via instances reference missing pad-stack definitions (${[...unresolvedViaDefinitionCounts.keys()].sort().join(", ")})`,
+    )
+  }
+  if (unresolvedViaPadCounts.size > 0) {
+    const unresolvedViaCount = [...unresolvedViaPadCounts.values()].reduce(
+      (totalCount, definitionCount) => totalCount + definitionCount,
+      0,
+    )
+    diagnostics.push(
+      `${unresolvedViaCount} ASCII via instances have no supported copper pads on their layer span (${[...unresolvedViaPadCounts.keys()].sort().join(", ")})`,
+    )
+  }
+  if (unsupportedViaPadShapeCounts.size > 0) {
+    const unsupportedPadCount = [
+      ...unsupportedViaPadShapeCounts.values(),
+    ].reduce((totalCount, shapeCount) => totalCount + shapeCount, 0)
+    diagnostics.push(
+      `${unsupportedPadCount} ASCII via layer pads use unsupported conductive shapes (${[...unsupportedViaPadShapeCounts.keys()].sort().join(", ")})`,
     )
   }
 }

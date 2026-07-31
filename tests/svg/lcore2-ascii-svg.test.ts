@@ -18,6 +18,8 @@ test.skipIf(!isAvailable)("renders the LCORE 2 ASCII board", async () => {
   expect(vias).toHaveLength(24)
   expect(vias.every((via) => via.radius === 300_000)).toBe(true)
   expect(vias.every((via) => via.drillRadius === 150_000)).toBe(true)
+  expect(vias.every((via) => via.copperPads?.length === 2)).toBe(true)
+  expect(vias.flatMap((via) => via.copperPads ?? [])).toHaveLength(48)
   expectGerberStyleSvg(svg)
   expect(svg).toContain('data-kind="outline"')
   expect(svg).toContain('data-kind="placement"')

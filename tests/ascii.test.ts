@@ -185,14 +185,17 @@ describe("PADS ASCII", () => {
       "*PCB*",
       "MAXIMUMLAYER 4",
       "*VIA*",
-      "ROUNDVIA 20 3",
+      "ROUNDVIA 20 5",
       "-2 40 R",
-      "-1 80 RA 60",
-      "0 40 R",
-      "SQUAREVIA 10 3 2 3",
+      "-1 60 R",
+      "0 50 R",
+      "2 70 S",
+      "3 80 RA 60",
+      "SQUAREVIA 10 4 2 3",
       "-2 30 S",
       "-1 70 SA 50",
-      "0 30 S",
+      "0 40 R",
+      "3 90 RT 45 120 15 4",
       "*ROUTE*",
       "*SIGNAL* ROUND_NET",
       "U1.1 U2.1",
@@ -215,17 +218,25 @@ describe("PADS ASCII", () => {
     const bottomCopperSvg = generateSvgFromPads(document, {
       visibleGerberLayers: ["B_Cu"],
     })
+    const firstInnerCopperSvg = generateSvgFromPads(document, {
+      visibleGerberLayers: ["In1_Cu"],
+    })
 
     expect(geometry.circles).toHaveLength(3)
     expect(geometry.circles[0]).toMatchObject({
       kind: "via",
       center: { x: 100, y: 0 },
-      radius: 20,
+      radius: 35,
       drillRadius: 10,
       shape: "circle",
+      copperPads: [
+        { layer: 1, radius: 20, shape: "circle" },
+        { layer: 2, radius: 35, shape: "square" },
+        { layer: 4, radius: 25, shape: "circle" },
+      ],
       startLayer: 1,
       endLayer: 4,
-      width: 10,
+      width: 25,
       name: "ROUNDVIA",
       netName: "ROUND_NET",
     })
@@ -235,6 +246,7 @@ describe("PADS ASCII", () => {
       radius: 15,
       drillRadius: 5,
       shape: "square",
+      copperPads: [{ layer: 2, radius: 15, shape: "square" }],
       startLayer: 2,
       endLayer: 3,
       width: 10,
@@ -245,13 +257,20 @@ describe("PADS ASCII", () => {
     expect(geometry.diagnostics).toContain(
       "1 ASCII via instances reference missing pad-stack definitions (MISSINGVIA)",
     )
-    expect(svg).toContain('<rect id="pads-via-aperture-2"')
-    expect(svg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(2)
+    expect(geometry.diagnostics).toContain(
+      "1 ASCII via layer pads use unsupported conductive shapes (RT)",
+    )
+    expect(svg).toContain('<rect id="pads-via-aperture-')
+    expect(svg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(6)
     expect(svg.match(/data-name="SQUAREVIA"/gu)).toHaveLength(1)
-    expect(svg).toContain('<circle data-kind="drill" cx="100" cy="0" r="10"/>')
-    expect(svg).toContain('<circle data-kind="drill" cx="100" cy="100" r="5"/>')
+    expect(svg).toContain('cx="100" cy="0" r="10"/>')
+    expect(svg).toContain('cx="100" cy="100" r="5"/>')
     expect(bottomCopperSvg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(2)
     expect(bottomCopperSvg).not.toContain('data-name="SQUAREVIA"')
+    expect(bottomCopperSvg).not.toContain('cx="100" cy="100" r="5"/>')
+    expect(firstInnerCopperSvg.match(/data-pad-layer="2"/gu)).toHaveLength(3)
+    expect(firstInnerCopperSvg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(2)
+    expect(firstInnerCopperSvg.match(/data-name="SQUAREVIA"/gu)).toHaveLength(1)
   })
 
   test("accepts numeric footprint names in part placements", () => {

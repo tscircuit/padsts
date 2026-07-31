@@ -145,9 +145,18 @@ with a typed ASCII AST.
   - [ ] Plating.
   - [x] Start and end layers when present.
   - [ ] Per-layer pad shape and dimensions.
+    - [x] Map `-2`, `-1`, and `0` to the effective start, interior, and end
+      layers.
+    - [x] Apply positive layer-number records as specific-layer overrides.
+    - [x] Preserve round and square pad dimensions on every resolved copper
+      layer.
+    - [ ] Decode annular, finger, rounded, chamfered, and custom shapes.
   - [ ] Thermal, clearance, and antipad definitions.
+    - [x] Recognize round and square antipads as negative geometry and avoid
+      replacing them with a generic positive pad.
+    - [ ] Render antipad voids and thermal spokes.
   - [ ] Blind, buried, microvia, and through-via distinctions.
-- [x] Extract a conservative round or square copper aperture from basic
+- [x] Preserve resolved per-layer round and square copper apertures from basic
   conductive `VIA` pad-stack records for visualization.
 - [ ] Parse reusable pad stacks independently of placed vias.
 - [ ] Resolve every routed via instance to its library definition.
@@ -416,7 +425,10 @@ partial and based on a small number of observed record offsets.
 - [ ] Render verified pad-stack shapes and drill geometry.
   - [x] Render resolved ASCII round and square via apertures with exact drill
     radii and layer-span metadata.
-  - [ ] Render distinct per-layer pad, antipad, and thermal geometry.
+  - [x] Render distinct round and square pads for each selected copper layer.
+  - [x] Filter drill overlays to vias whose span intersects the selected
+    copper layers.
+  - [ ] Render antipad and thermal geometry.
 - [ ] Render correct binary layer assignments.
 - [ ] Render verified board edges and cutouts for every binary version.
 - [ ] Add solder-mask, solder-paste, fabrication, assembly, courtyard, and
@@ -516,6 +528,8 @@ partial and based on a small number of observed record offsets.
   - [ ] Representative named entities and coordinates.
   - [ ] Expected diagnostics and decode coverage.
 - [ ] Add small synthetic ASCII fixtures for every record type and edge case.
+  - [x] Cover top/interior/bottom via pads, partial spans, and explicit
+    layer-specific pad overrides with per-layer SVG snapshots.
 - [ ] Add minimal synthetic binary fixtures for every versioned record layout.
 - [ ] Add malformed-record tests inside sections, not only malformed container
   tests.
