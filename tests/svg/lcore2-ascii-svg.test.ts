@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import {
   expectGerberStyleSvg,
   expectVisualSnapshotViews,
+  extractDownloadedPadsAssetGeometry,
   getSvgTestAsset,
   isSvgTestAssetAvailable,
   renderDownloadedPadsAsset,
@@ -11,7 +12,12 @@ const asset = getSvgTestAsset("kicad-lcore2-ascii")
 const isAvailable = await isSvgTestAssetAvailable(asset)
 
 test.skipIf(!isAvailable)("renders the LCORE 2 ASCII board", async () => {
+  const geometry = await extractDownloadedPadsAssetGeometry(asset)
+  const vias = geometry.circles.filter((circle) => circle.kind === "via")
   const svg = await renderDownloadedPadsAsset(asset)
+  expect(vias).toHaveLength(24)
+  expect(vias.every((via) => via.radius === 300_000)).toBe(true)
+  expect(vias.every((via) => via.drillRadius === 150_000)).toBe(true)
   expectGerberStyleSvg(svg)
   expect(svg).toContain('data-kind="outline"')
   expect(svg).toContain('data-kind="placement"')

@@ -47,6 +47,7 @@ interface ViaAperture {
   id: string
   radius: number
   drillRadius: number
+  shape: "circle" | "square"
 }
 
 const DEFAULT_GERBER_LAYER_COLORS: Record<string, string> = {
@@ -481,6 +482,13 @@ const getViaDrillRadius = (
     Math.abs(circle.radius),
     minimumFeatureSize * 1.8,
   )
+  if (
+    circle.drillRadius !== undefined &&
+    Number.isFinite(circle.drillRadius) &&
+    circle.drillRadius > 0
+  ) {
+    return Math.min(Math.abs(circle.drillRadius), outerRadius * 0.999)
+  }
   const annularWidth = Math.max(
     Math.min(Math.abs(circle.width), outerRadius * 0.55),
     minimumFeatureSize * 0.65,
@@ -502,13 +510,15 @@ const getViaApertures = (
     if (circle.kind !== "via") continue
     const radius = Math.max(Math.abs(circle.radius), minimumFeatureSize * 1.8)
     const drillRadius = getViaDrillRadius(circle, minimumFeatureSize)
-    const apertureKey = `${formatNumber(radius)}:${formatNumber(drillRadius)}`
+    const shape = circle.shape ?? "circle"
+    const apertureKey = `${shape}:${formatNumber(radius)}:${formatNumber(drillRadius)}`
     let aperture = apertureByKey.get(apertureKey)
     if (!aperture) {
       aperture = {
         id: `pads-via-aperture-${apertureByKey.size + 1}`,
         radius,
         drillRadius,
+        shape,
       }
       apertureByKey.set(apertureKey, aperture)
     }
@@ -520,11 +530,42 @@ const getViaApertures = (
 
 const renderApertureDefinitions = (apertures: ViaAperture[]): string =>
   apertures
-    .map(
-      (aperture) =>
-        `<circle id="${aperture.id}" cx="0" cy="0" r="${formatNumber(aperture.radius)}"/>`,
+    .map((aperture) =>
+      aperture.shape === "square"
+        ? `<rect id="${aperture.id}" x="${formatNumber(-aperture.radius)}" y="${formatNumber(-aperture.radius)}" width="${formatNumber(aperture.radius * 2)}" height="${formatNumber(aperture.radius * 2)}"/>`
+        : `<circle id="${aperture.id}" cx="0" cy="0" r="${formatNumber(aperture.radius)}"/>`,
     )
     .join("")
+
+const getCircleCopperLayers = ({
+  circle,
+  geometry,
+}: {
+  circle: PadsGeometryCircle
+  geometry: PadsBoardGeometry
+}): (number | string | undefined)[] => {
+  if (
+    circle.kind !== "via" ||
+    circle.startLayer === undefined ||
+    circle.endLayer === undefined ||
+    !Number.isFinite(circle.startLayer) ||
+    !Number.isFinite(circle.endLayer)
+  ) {
+    return [circle.layer]
+  }
+
+  const firstLayer = Math.max(
+    1,
+    Math.min(Math.trunc(circle.startLayer), Math.trunc(circle.endLayer)),
+  )
+  const lastLayer = Math.min(
+    geometry.layerCount,
+    Math.max(Math.trunc(circle.startLayer), Math.trunc(circle.endLayer)),
+  )
+  const layers: number[] = []
+  for (let layer = firstLayer; layer <= lastLayer; layer++) layers.push(layer)
+  return layers.length > 0 ? layers : [circle.layer]
+}
 
 const renderCopperCircles = ({
   context,
@@ -536,10 +577,23 @@ const renderCopperCircles = ({
   const circlesByLayer = new Map<string, PadsGeometryCircle[]>()
   for (const circle of context.geometry.circles) {
     if (circle.kind !== "via" && circle.kind !== "copper") continue
-    const layerName = getGerberCopperLayerName({
-      geometry: context.geometry,
-      layer: circle.layer,
-    })
+    const candidateLayerNames = [
+      ...new Set(
+        getCircleCopperLayers({
+          circle,
+          geometry: context.geometry,
+        }).map((layer) =>
+          getGerberCopperLayerName({
+            geometry: context.geometry,
+            layer,
+          }),
+        ),
+      ),
+    ]
+    const layerName = candidateLayerNames.find((candidateLayerName) =>
+      shouldRenderLayer(context, candidateLayerName),
+    )
+    if (!layerName) continue
     const layerCircles = circlesByLayer.get(layerName) ?? []
     layerCircles.push(circle)
     circlesByLayer.set(layerName, layerCircles)
@@ -558,7 +612,11 @@ const renderCopperCircles = ({
           if (circle.kind === "via") {
             const aperture = apertureByCircle.get(circle)
             if (!aperture) return ""
-            return `<use ${attributes} xlink:href="#${aperture.id}" href="#${aperture.id}" x="${formatNumber(circle.center.x)}" y="${formatNumber(circle.center.y)}"/>`
+            const layerSpanAttributes =
+              circle.startLayer !== undefined && circle.endLayer !== undefined
+                ? ` data-start-layer="${formatNumber(circle.startLayer)}" data-end-layer="${formatNumber(circle.endLayer)}"`
+                : ""
+            return `<use ${attributes}${layerSpanAttributes} xlink:href="#${aperture.id}" href="#${aperture.id}" x="${formatNumber(circle.center.x)}" y="${formatNumber(circle.center.y)}"/>`
           }
 
           const radius = Math.max(
@@ -806,12 +864,13 @@ const renderUnverifiedConnections = (context: RenderContext): string => {
         : ""
     })
     .join("")
-  const pointRadius = context.minimumFeatureSize * 1.1
+  const pointRadius = context.minimumFeatureSize * 3
+  const pointStrokeWidth = context.minimumFeatureSize
   const viaElements = context.geometry.unverifiedViaLocations
     .filter((point) => pointInsideBounds({ point, bounds: context.bounds }))
     .map(
       (point) =>
-        `<circle data-kind="unverified-via-location" cx="${formatNumber(point.x)}" cy="${formatNumber(point.y)}" r="${formatNumber(pointRadius)}"/>`,
+        `<circle data-kind="unverified-via-location" cx="${formatNumber(point.x)}" cy="${formatNumber(point.y)}" r="${formatNumber(pointRadius)}" fill="none" stroke="currentColor" stroke-width="${formatNumber(pointStrokeWidth)}"/>`,
     )
     .join("")
   if (!connectionElements && !viaElements) return ""

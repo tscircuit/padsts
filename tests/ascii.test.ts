@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   detectPadsFormat,
   extractPadsBoardGeometry,
+  generateSvgFromPads,
   PadsAsciiUnknownSection,
   parsePads,
   parsePadsAscii,
@@ -176,6 +177,81 @@ describe("PADS ASCII", () => {
     expect(geometry.diagnostics).toContain(
       "1 ASCII route arc records could not be decoded",
     )
+  })
+
+  test("resolves routed vias from round and square pad-stack definitions", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-MILS! DESIGN DATABASE ASCII FILE 1.0",
+      "*PCB*",
+      "MAXIMUMLAYER 4",
+      "*VIA*",
+      "ROUNDVIA 20 3",
+      "-2 40 R",
+      "-1 80 RA 60",
+      "0 40 R",
+      "SQUAREVIA 10 3 2 3",
+      "-2 30 S",
+      "-1 70 SA 50",
+      "0 30 S",
+      "*ROUTE*",
+      "*SIGNAL* ROUND_NET",
+      "U1.1 U2.1",
+      "0 0 1 8 0",
+      "100 0 2 8 256 ROUNDVIA",
+      "",
+      "*SIGNAL* SQUARE_NET",
+      "U1.2 U2.2",
+      "0 100 2 8 0",
+      "100 100 3 8 256 SQUAREVIA",
+      "",
+      "V 200 200 ROUNDVIA 1 4",
+      "V 300 300 MISSINGVIA 1 4",
+      "*END*",
+      "",
+    ].join("\n")
+    const document = parsePadsAscii(sourceText)
+    const geometry = extractPadsBoardGeometry(document)
+    const svg = generateSvgFromPads(document)
+    const bottomCopperSvg = generateSvgFromPads(document, {
+      visibleGerberLayers: ["B_Cu"],
+    })
+
+    expect(geometry.circles).toHaveLength(3)
+    expect(geometry.circles[0]).toMatchObject({
+      kind: "via",
+      center: { x: 100, y: 0 },
+      radius: 20,
+      drillRadius: 10,
+      shape: "circle",
+      startLayer: 1,
+      endLayer: 4,
+      width: 10,
+      name: "ROUNDVIA",
+      netName: "ROUND_NET",
+    })
+    expect(geometry.circles[1]).toMatchObject({
+      kind: "via",
+      center: { x: 100, y: 100 },
+      radius: 15,
+      drillRadius: 5,
+      shape: "square",
+      startLayer: 2,
+      endLayer: 3,
+      width: 10,
+      name: "SQUAREVIA",
+      netName: "SQUARE_NET",
+    })
+    expect(geometry.unverifiedViaLocations).toEqual([{ x: 300, y: 300 }])
+    expect(geometry.diagnostics).toContain(
+      "1 ASCII via instances reference missing pad-stack definitions (MISSINGVIA)",
+    )
+    expect(svg).toContain('<rect id="pads-via-aperture-2"')
+    expect(svg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(2)
+    expect(svg.match(/data-name="SQUAREVIA"/gu)).toHaveLength(1)
+    expect(svg).toContain('<circle data-kind="drill" cx="100" cy="0" r="10"/>')
+    expect(svg).toContain('<circle data-kind="drill" cx="100" cy="100" r="5"/>')
+    expect(bottomCopperSvg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(2)
+    expect(bottomCopperSvg).not.toContain('data-name="SQUAREVIA"')
   })
 
   test("accepts numeric footprint names in part placements", () => {

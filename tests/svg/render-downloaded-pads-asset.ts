@@ -1,5 +1,11 @@
 import { expect } from "bun:test"
-import { type GeneratePadsSvgOptions, generateSvgFromPads } from "../../lib"
+import {
+  extractPadsBoardGeometry,
+  type GeneratePadsSvgOptions,
+  generateSvgFromPads,
+  type PadsBoardGeometry,
+  parsePads,
+} from "../../lib"
 import {
   downloadableTestAssets,
   getDownloadedTestAssetPath,
@@ -29,6 +35,13 @@ export const renderDownloadedPadsAsset = async (
 ): Promise<string> => {
   const sourceBytes = await Bun.file(getDownloadedTestAssetPath(asset)).bytes()
   return generateSvgFromPads(sourceBytes, options)
+}
+
+export const extractDownloadedPadsAssetGeometry = async (
+  asset: SvgTestAsset,
+): Promise<PadsBoardGeometry> => {
+  const sourceBytes = await Bun.file(getDownloadedTestAssetPath(asset)).bytes()
+  return extractPadsBoardGeometry(parsePads(sourceBytes))
 }
 
 const COPPER_VIEW_LAYERS = [

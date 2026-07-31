@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import {
   expectGerberStyleSvg,
   expectVisualSnapshotViews,
+  extractDownloadedPadsAssetGeometry,
   getSvgTestAsset,
   isSvgTestAssetAvailable,
   renderDownloadedPadsAsset,
@@ -13,7 +14,12 @@ const isAvailable = await isSvgTestAssetAvailable(asset)
 test.skipIf(!isAvailable)(
   "renders the EMS4 ASCII reference board",
   async () => {
+    const geometry = await extractDownloadedPadsAssetGeometry(asset)
+    const vias = geometry.circles.filter((circle) => circle.kind === "via")
     const svg = await renderDownloadedPadsAsset(asset)
+    expect(vias).toHaveLength(1074)
+    expect(vias.every((via) => via.drillRadius !== undefined)).toBe(true)
+    expect(vias.filter((via) => via.shape === "square")).toHaveLength(455)
     expectGerberStyleSvg(svg)
     expect(svg).toContain('data-kind="outline"')
     expect(svg).toContain('data-kind="placement"')

@@ -139,15 +139,24 @@ with a typed ASCII AST.
 ### Via and pad-stack library
 
 - [ ] Parse `VIA` definitions.
-  - [ ] Via name and type.
-  - [ ] Drill diameter and plating.
-  - [ ] Start and end layers.
+  - [x] Via name.
+  - [ ] Via type.
+  - [x] Drill diameter.
+  - [ ] Plating.
+  - [x] Start and end layers when present.
   - [ ] Per-layer pad shape and dimensions.
   - [ ] Thermal, clearance, and antipad definitions.
   - [ ] Blind, buried, microvia, and through-via distinctions.
+- [x] Extract a conservative round or square copper aperture from basic
+  conductive `VIA` pad-stack records for visualization.
 - [ ] Parse reusable pad stacks independently of placed vias.
 - [ ] Resolve every routed via instance to its library definition.
-- [ ] Remove hard-coded visualization diameters and drill sizes.
+- [x] Resolve named route and explicit `V` instances when their `VIA`
+  definition is present.
+- [x] Quarantine routed vias with missing definitions in the debug layer
+  instead of inventing physical geometry.
+- [ ] Remove every inferred fallback visualization size from the public
+  geometry/SVG path.
 
 ### Footprints, parts, and placements
 
@@ -405,6 +414,9 @@ partial and based on a small number of observed record offsets.
 - [ ] Render other curve primitives.
 - [ ] Render footprint pads and graphics from decoded decals.
 - [ ] Render verified pad-stack shapes and drill geometry.
+  - [x] Render resolved ASCII round and square via apertures with exact drill
+    radii and layer-span metadata.
+  - [ ] Render distinct per-layer pad, antipad, and thermal geometry.
 - [ ] Render correct binary layer assignments.
 - [ ] Render verified board edges and cutouts for every binary version.
 - [ ] Add solder-mask, solder-paste, fabrication, assembly, courtyard, and
@@ -429,7 +441,11 @@ partial and based on a small number of observed record offsets.
 - [ ] Add semantic assertions alongside image snapshots.
   - [ ] Expected layer names.
   - [ ] Expected entity counts.
+    - [x] Assert exact routed-via counts for the LCORE2, Dexter, and EMS4 ASCII
+      references.
   - [ ] Representative coordinates and dimensions.
+    - [x] Assert representative resolved via sizes, drill sizes, shapes, and
+      layer spans.
   - [ ] No unexpected decoder diagnostics.
 - [ ] Compare rendered geometry with an independent importer, not only prior
   `padsts` snapshots.

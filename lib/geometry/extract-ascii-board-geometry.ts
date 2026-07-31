@@ -346,17 +346,134 @@ const addLineSectionGeometry = ({
   }
 }
 
+interface AsciiViaDefinition {
+  name: string
+  drillRadius: number
+  radius: number
+  shape: "circle" | "square"
+  startLayer?: number
+  endLayer?: number
+}
+
+const parseViaDefinitions = ({
+  sections,
+  diagnostics,
+}: {
+  sections: AsciiSectionLines[]
+  diagnostics: string[]
+}): Map<string, AsciiViaDefinition> => {
+  const definitions = new Map<string, AsciiViaDefinition>()
+  let malformedDefinitionCount = 0
+  let unsupportedPadShapeCount = 0
+
+  for (const section of sections) {
+    if (section.name !== "VIA") continue
+
+    let lineIndex = 0
+    while (lineIndex < section.lines.length) {
+      const headerTokens = tokenizeLine(section.lines[lineIndex] ?? "")
+      const name = headerTokens[0]
+      const drillDiameter = parseFiniteNumber(headerTokens[1])
+      const stackLineCount = parseFiniteNumber(headerTokens[2])
+      if (
+        !name ||
+        name.startsWith("*") ||
+        drillDiameter === undefined ||
+        drillDiameter <= 0 ||
+        stackLineCount === undefined ||
+        stackLineCount < 1
+      ) {
+        lineIndex++
+        continue
+      }
+
+      const normalizedStackLineCount = Math.trunc(stackLineCount)
+      const startLayer = parseFiniteNumber(headerTokens[3])
+      const endLayer = parseFiniteNumber(headerTokens[4])
+      const padCandidates: {
+        radius: number
+        shape: "circle" | "square"
+      }[] = []
+      lineIndex++
+
+      let parsedStackLineCount = 0
+      while (
+        lineIndex < section.lines.length &&
+        parsedStackLineCount < normalizedStackLineCount
+      ) {
+        const stackTokens = tokenizeLine(section.lines[lineIndex] ?? "")
+        lineIndex++
+        if (stackTokens.length === 0 || stackTokens[0]?.startsWith("*REMARK")) {
+          continue
+        }
+        parsedStackLineCount++
+
+        const diameter = parseFiniteNumber(stackTokens[1])
+        const shapeCode = stackTokens[2]?.toUpperCase()
+        if (diameter === undefined || diameter <= 0 || !shapeCode) continue
+        if (shapeCode === "R" || shapeCode === "S") {
+          padCandidates.push({
+            radius: diameter / 2,
+            shape: shapeCode === "S" ? "square" : "circle",
+          })
+        }
+      }
+
+      const largestPad = padCandidates.sort(
+        (firstPad, secondPad) => secondPad.radius - firstPad.radius,
+      )[0]
+      if (!largestPad) {
+        unsupportedPadShapeCount++
+        continue
+      }
+      if (parsedStackLineCount !== normalizedStackLineCount) {
+        malformedDefinitionCount++
+        continue
+      }
+
+      definitions.set(name, {
+        name,
+        drillRadius: drillDiameter / 2,
+        radius: largestPad.radius,
+        shape: largestPad.shape,
+        ...(startLayer !== undefined && endLayer !== undefined
+          ? {
+              startLayer: Math.trunc(startLayer),
+              endLayer: Math.trunc(endLayer),
+            }
+          : {}),
+      })
+    }
+  }
+
+  if (malformedDefinitionCount > 0) {
+    diagnostics.push(
+      `${malformedDefinitionCount} ASCII via definitions ended before all pad-stack records were parsed`,
+    )
+  }
+  if (unsupportedPadShapeCount > 0) {
+    diagnostics.push(
+      `${unsupportedPadShapeCount} ASCII via definitions have no supported round or square copper pad`,
+    )
+  }
+  return definitions
+}
+
 const addRouteSectionGeometry = ({
   section,
   layerCount,
+  viaDefinitions,
   paths,
   circles,
+  unverifiedViaLocations,
   diagnostics,
 }: {
   section: AsciiSectionLines
   layerCount: number
+  viaDefinitions: Map<string, AsciiViaDefinition>
   paths: PadsGeometryPath[]
   circles: PadsGeometryCircle[]
+  unverifiedViaLocations: PadsGeometryPoint[]
   diagnostics: string[]
 }): void => {
   type RoutePoint = PadsGeometryPoint & { layer: number; width: number }
@@ -372,8 +489,47 @@ const addRouteSectionGeometry = ({
   let skippedUnroutedSegmentCount = 0
   let skippedNonCopperSegmentCount = 0
   let malformedArcCount = 0
+  const unresolvedViaDefinitionCounts = new Map<string, number>()
   let previousPoint: RoutePoint | undefined
   let pendingArc: PendingRouteArc | undefined
+
+  const addVia = ({
+    location,
+    name,
+    startLayer,
+    endLayer,
+  }: {
+    location: PadsGeometryPoint
+    name: string
+    startLayer?: number
+    endLayer?: number
+  }): void => {
+    const definition = viaDefinitions.get(name)
+    if (!definition) {
+      unverifiedViaLocations.push(location)
+      unresolvedViaDefinitionCounts.set(
+        name,
+        (unresolvedViaDefinitionCounts.get(name) ?? 0) + 1,
+      )
+      return
+    }
+
+    const resolvedStartLayer = startLayer ?? definition.startLayer ?? 1
+    const resolvedEndLayer = endLayer ?? definition.endLayer ?? layerCount
+    circles.push({
+      kind: "via",
+      center: location,
+      radius: definition.radius,
+      drillRadius: definition.drillRadius,
+      shape: definition.shape,
+      startLayer: resolvedStartLayer,
+      endLayer: resolvedEndLayer,
+      width: Math.max(definition.radius - definition.drillRadius, 0),
+      layer: resolvedStartLayer,
+      name,
+      netName,
+    })
+  }
 
   const resetRouteState = (): void => {
     if (pendingArc) malformedArcCount++
@@ -454,14 +610,13 @@ const addRouteSectionGeometry = ({
     if (lineTokens[0] === "V") {
       const x = parseFiniteNumber(lineTokens[1])
       const y = parseFiniteNumber(lineTokens[2])
-      if (x !== undefined && y !== undefined) {
-        circles.push({
-          kind: "via",
-          center: { x, y },
-          radius: 40,
-          width: 10,
-          name: lineTokens[3],
-          netName,
+      const name = lineTokens[3]
+      if (x !== undefined && y !== undefined && name) {
+        addVia({
+          location: { x, y },
+          name,
+          startLayer: parseFiniteNumber(lineTokens[4]),
+          endLayer: parseFiniteNumber(lineTokens[5]),
         })
       }
       resetRouteState()
@@ -541,17 +696,13 @@ const addRouteSectionGeometry = ({
     }
     pendingArc = undefined
 
-    const hasViaName = lineTokens
-      .slice(5)
-      .some((token) => token.toUpperCase().includes("VIA"))
-    if (hasViaName) {
-      circles.push({
-        kind: "via",
-        center: { x, y },
-        radius: Math.max(width, 1),
-        width: Math.max(width / 4, 1),
-        layer,
-        netName,
+    const viaName =
+      lineTokens.slice(5).find((token) => viaDefinitions.has(token)) ??
+      lineTokens.slice(5).find((token) => token.toUpperCase().includes("VIA"))
+    if (viaName) {
+      addVia({
+        location: { x, y },
+        name: viaName,
       })
     }
 
@@ -573,6 +724,14 @@ const addRouteSectionGeometry = ({
   if (malformedArcCount > 0) {
     diagnostics.push(
       `${malformedArcCount} ASCII route arc records could not be decoded`,
+    )
+  }
+  if (unresolvedViaDefinitionCounts.size > 0) {
+    const unresolvedViaCount = [
+      ...unresolvedViaDefinitionCounts.values(),
+    ].reduce((totalCount, definitionCount) => totalCount + definitionCount, 0)
+    diagnostics.push(
+      `${unresolvedViaCount} ASCII via instances reference missing pad-stack definitions (${[...unresolvedViaDefinitionCounts.keys()].sort().join(", ")})`,
     )
   }
 }
@@ -689,11 +848,13 @@ export const extractAsciiBoardGeometry = (
   const sections = collectTopLevelSections(document.getString())
   const layers = parseLayerInfo(sections)
   const layerCount = parseLayerCount(sections, layers)
+  const diagnostics: string[] = []
+  const viaDefinitions = parseViaDefinitions({ sections, diagnostics })
   const paths: PadsGeometryPath[] = []
   const circles: PadsGeometryCircle[] = []
   const texts: PadsGeometryText[] = []
   const placements: PadsGeometryPlacement[] = []
-  const diagnostics: string[] = []
+  const unverifiedViaLocations: PadsGeometryPoint[] = []
 
   for (const section of sections) {
     if (section.name === "LINES") {
@@ -702,8 +863,10 @@ export const extractAsciiBoardGeometry = (
       addRouteSectionGeometry({
         section,
         layerCount,
+        viaDefinitions,
         paths,
         circles,
+        unverifiedViaLocations,
         diagnostics,
       })
     } else if (section.name === "TEXT") {
@@ -724,7 +887,7 @@ export const extractAsciiBoardGeometry = (
     placements,
     unassignedVertices: [],
     unverifiedConnections: [],
-    unverifiedViaLocations: [],
+    unverifiedViaLocations,
     binarySections: [],
     diagnostics,
   }

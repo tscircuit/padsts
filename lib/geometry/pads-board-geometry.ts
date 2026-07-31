@@ -49,6 +49,10 @@ export interface PadsGeometryCircle {
   kind: PadsGeometryCircleKind
   center: PadsGeometryPoint
   radius: number
+  drillRadius?: number
+  shape?: "circle" | "square"
+  startLayer?: number
+  endLayer?: number
   width: number
   layer?: number | string
   name?: string
