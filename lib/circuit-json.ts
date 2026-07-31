@@ -9,6 +9,10 @@ import {
   type PadsGeometryPath,
 } from "./geometry"
 import { type PadsDocument, parsePads } from "./parse-pads"
+import {
+  getPadsDocumentSourceProvenance,
+  type PadsSourceProvenance,
+} from "./source-provenance"
 
 export type PadsCircuitJsonLayer =
   | "top"
@@ -149,18 +153,20 @@ const getComponentBounds = (
 const createSkippedDiagnostic = ({
   code,
   message,
-  path,
+  entity,
+  source,
 }: {
   code: string
   message: string
-  path?: PadsGeometryPath
+  entity?: { id?: string; source?: PadsSourceProvenance }
+  source?: PadsSourceProvenance
 }): PadsDiagnostic => ({
   code,
   severity: "warning",
   category: "unsupported",
   message,
-  ...(path?.source ? { source: path.source } : {}),
-  ...(path?.id ? { entityIds: [path.id] } : {}),
+  ...(entity?.source || source ? { source: entity?.source ?? source } : {}),
+  ...(entity?.id ? { entityIds: [entity.id] } : {}),
 })
 
 export const convertPadsToCircuitJson = (
@@ -174,10 +180,17 @@ export const convertPadsToCircuitJson = (
   const geometry = extractPadsBoardGeometry(document)
   const circuitJson: PadsCircuitJson = []
   const conversionDiagnostics: PadsDiagnostic[] = []
-  const boardId = "pcb_board_pads"
+  const documentSource = getPadsDocumentSourceProvenance(document)
   const outline = getOutline(geometry)
+  const boardId = toStableCircuitJsonId(
+    "pcb_board",
+    outline?.source?.sourceId,
+    0,
+  )
+  const handledPaths = new Set<PadsGeometryPath>()
 
   if (outline) {
+    handledPaths.add(outline)
     const minimumX = Math.min(...outline.points.map(({ x }) => x))
     const minimumY = Math.min(...outline.points.map(({ y }) => y))
     const maximumX = Math.max(...outline.points.map(({ x }) => x))
@@ -202,6 +215,7 @@ export const convertPadsToCircuitJson = (
         code: "circuit-json-board-outline-unavailable",
         message:
           "Circuit JSON board output requires a closed, line-segment-only board outline",
+        source: documentSource,
       }),
     )
   }
@@ -210,14 +224,14 @@ export const convertPadsToCircuitJson = (
   for (const [index, placement] of geometry.placements.entries()) {
     const bounds = getComponentBounds(geometry, placement.reference)
     if (!bounds) {
-      conversionDiagnostics.push({
-        code: "circuit-json-component-bounds-unavailable",
-        severity: "warning",
-        category: "unsupported",
-        message: `Skipped ${placement.reference} because no decoded footprint geometry establishes its dimensions`,
-        ...(placement.source ? { source: placement.source } : {}),
-        ...(placement.id ? { entityIds: [placement.id] } : {}),
-      })
+      conversionDiagnostics.push(
+        createSkippedDiagnostic({
+          code: "circuit-json-component-bounds-unavailable",
+          message: `Skipped ${placement.reference} because no decoded footprint geometry establishes its dimensions`,
+          entity: placement,
+          source: documentSource,
+        }),
+      )
       continue
     }
     const pcbComponentId = toStableCircuitJsonId(
@@ -241,7 +255,17 @@ export const convertPadsToCircuitJson = (
 
   for (const [index, pad] of geometry.pads.entries()) {
     const layer = getCircuitJsonLayer(pad.layer, geometry.layerCount)
-    if (!layer) continue
+    if (!layer) {
+      conversionDiagnostics.push(
+        createSkippedDiagnostic({
+          code: "circuit-json-pad-layer-unavailable",
+          message: `Skipped ${pad.reference}.${pad.pinNumber} because PADS layer ${pad.layer} has no Circuit JSON layer mapping`,
+          entity: pad,
+          source: documentSource,
+        }),
+      )
+      continue
+    }
     const base = {
       type: "pcb_smtpad",
       pcb_smtpad_id: toStableCircuitJsonId(
@@ -364,7 +388,17 @@ export const convertPadsToCircuitJson = (
   }
 
   for (const [index, circle] of geometry.circles.entries()) {
-    if (circle.kind !== "via" || circle.drillRadius === undefined) continue
+    if (circle.kind !== "via" || circle.drillRadius === undefined) {
+      conversionDiagnostics.push(
+        createSkippedDiagnostic({
+          code: "circuit-json-circle-not-represented",
+          message: `Skipped ${circle.kind} circle because the current adapter only maps drilled vias`,
+          entity: circle,
+          source: documentSource,
+        }),
+      )
+      continue
+    }
     const startLayer = Math.trunc(circle.startLayer ?? 1)
     const endLayer = Math.trunc(circle.endLayer ?? geometry.layerCount)
     const layers = Array.from(
@@ -372,6 +406,18 @@ export const convertPadsToCircuitJson = (
       (_, layerOffset) =>
         getCircuitJsonLayer(startLayer + layerOffset, geometry.layerCount),
     ).filter((layer): layer is PadsCircuitJsonLayer => layer !== undefined)
+    if (layers.length === 0) {
+      conversionDiagnostics.push(
+        createSkippedDiagnostic({
+          code: "circuit-json-via-layers-unavailable",
+          message:
+            "Skipped a via because its layer span has no Circuit JSON layer mapping",
+          entity: circle,
+          source: documentSource,
+        }),
+      )
+      continue
+    }
     const outerRadius = Math.max(
       circle.radius,
       ...(circle.copperPads ?? []).map(({ radius }) => radius),
@@ -404,11 +450,14 @@ export const convertPadsToCircuitJson = (
           code: "circuit-json-route-not-exactly-representable",
           message:
             "Skipped a route whose layer or circular-arc geometry is not exactly representable by the current adapter",
-          path,
+          entity: path,
+          source: documentSource,
         }),
       )
+      handledPaths.add(path)
       continue
     }
+    handledPaths.add(path)
     circuitJson.push({
       type: "pcb_trace",
       pcb_trace_id: toStableCircuitJsonId(
@@ -438,7 +487,20 @@ export const convertPadsToCircuitJson = (
     const pcbComponentId = reference
       ? componentIdByReference.get(reference)
       : undefined
-    if (!pcbComponentId) continue
+    if (!pcbComponentId) {
+      conversionDiagnostics.push(
+        createSkippedDiagnostic({
+          code: "circuit-json-silkscreen-component-unavailable",
+          message:
+            "Skipped a silkscreen path because its decoded component was not emitted",
+          entity: path,
+          source: documentSource,
+        }),
+      )
+      handledPaths.add(path)
+      continue
+    }
+    handledPaths.add(path)
     circuitJson.push({
       type: "pcb_silkscreen_path",
       pcb_silkscreen_path_id: toStableCircuitJsonId(
@@ -451,6 +513,66 @@ export const convertPadsToCircuitJson = (
       route: path.points.map(toCircuitJsonPoint),
       stroke_width: nmToMm(path.width),
     })
+  }
+
+  for (const path of geometry.paths) {
+    if (handledPaths.has(path)) continue
+    conversionDiagnostics.push(
+      createSkippedDiagnostic({
+        code: `circuit-json-${path.kind}-path-not-represented`,
+        message: `Skipped a ${path.kind} path because the current Circuit JSON adapter does not represent this path role or geometry`,
+        entity: path,
+        source: documentSource,
+      }),
+    )
+  }
+
+  for (const text of geometry.texts) {
+    conversionDiagnostics.push(
+      createSkippedDiagnostic({
+        code: "circuit-json-text-not-represented",
+        message:
+          "Skipped decoded PADS text because text conversion is not implemented",
+        entity: text,
+        source: documentSource,
+      }),
+    )
+  }
+
+  for (const point of geometry.unassignedVertices) {
+    conversionDiagnostics.push(
+      createSkippedDiagnostic({
+        code: "circuit-json-unassigned-vertex-not-represented",
+        message:
+          "Skipped an unassigned native vertex whose owning geometry is not verified",
+        entity: point,
+        source: documentSource,
+      }),
+    )
+  }
+
+  for (const path of geometry.unverifiedConnections) {
+    conversionDiagnostics.push(
+      createSkippedDiagnostic({
+        code: "circuit-json-unverified-connection-not-represented",
+        message:
+          "Skipped a native connection candidate whose record layout is not verified",
+        entity: path,
+        source: documentSource,
+      }),
+    )
+  }
+
+  for (const point of geometry.unverifiedViaLocations) {
+    conversionDiagnostics.push(
+      createSkippedDiagnostic({
+        code: "circuit-json-unverified-via-not-represented",
+        message:
+          "Skipped a native via candidate whose record layout is not verified",
+        entity: point,
+        source: documentSource,
+      }),
+    )
   }
 
   const baseReport = createPadsConversionReport(document, { strict: false })
@@ -470,6 +592,7 @@ export const convertPadsToCircuitJson = (
       category: "coverage",
       message:
         "Strict Circuit JSON conversion refused source data that cannot be represented exactly",
+      source: documentSource,
     })
   }
   return { circuitJson, report }

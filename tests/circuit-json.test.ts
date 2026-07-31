@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { convertPadsToCircuitJson, toCircuitJson } from "../lib"
+import { any_circuit_element } from "circuit-json"
+import {
+  convertPadsToCircuitJson,
+  extractPadsBoardGeometry,
+  parsePadsAscii,
+  toCircuitJson,
+} from "../lib"
 
 const fixture = readFileSync(
   join(import.meta.dir, "fixtures/placed-decals.asc"),
@@ -9,6 +15,27 @@ const fixture = readFileSync(
 )
 
 describe("Circuit JSON conversion", () => {
+  test("validates every emitted synthetic-fixture element against the current schema", () => {
+    const fixtureNames = readdirSync(join(import.meta.dir, "fixtures")).filter(
+      (name) => name.endsWith(".asc"),
+    )
+
+    for (const fixtureName of fixtureNames) {
+      const source = readFileSync(
+        join(import.meta.dir, "fixtures", fixtureName),
+        "utf8",
+      )
+      for (const [index, element] of toCircuitJson(source).entries()) {
+        const result = any_circuit_element.safeParse(element)
+        if (!result.success) {
+          throw new Error(
+            `${fixtureName} Circuit JSON element ${index} (${element.type}) failed schema validation: ${result.error.message}`,
+          )
+        }
+      }
+    }
+  })
+
   test("maps verified board, component, pad, hole, via, and trace geometry in millimeters", () => {
     const circuitJson = toCircuitJson(fixture)
     const board = circuitJson.find(({ type }) => type === "pcb_board")
@@ -57,6 +84,34 @@ describe("Circuit JSON conversion", () => {
         code: "strict-circuit-json-conversion-would-be-lossy",
         severity: "error",
       }),
+    )
+  })
+
+  test("reports each skipped normalized entity with source provenance", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "fixtures/decal-graphics.asc"),
+      "utf8",
+    )
+    const geometry = extractPadsBoardGeometry(parsePadsAscii(source))
+    const result = convertPadsToCircuitJson(source)
+    const skippedEntityIds = result.report.diagnostics.flatMap(
+      ({ entityIds }) => entityIds ?? [],
+    )
+
+    expect(result.report.diagnostics).toHaveLength(16)
+    expect(
+      result.report.diagnostics.every(
+        (diagnostic) =>
+          diagnostic.source !== undefined && diagnostic.entityIds?.length === 1,
+      ),
+    ).toBe(true)
+    expect(new Set(skippedEntityIds)).toEqual(
+      new Set([
+        ...geometry.circles.flatMap(({ id }) => (id ? [id] : [])),
+        ...geometry.paths
+          .filter(({ kind }) => kind !== "outline")
+          .flatMap(({ id }) => (id ? [id] : [])),
+      ]),
     )
   })
 })

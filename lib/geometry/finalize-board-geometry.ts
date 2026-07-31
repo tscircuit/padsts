@@ -28,11 +28,15 @@ const getDiagnosticCategory = (message: string): PadsDiagnosticCategory => {
   return "unsupported"
 }
 
-const toStructuredDiagnostic = (message: string): PadsDiagnostic => ({
+const toStructuredDiagnostic = (
+  message: string,
+  source: PadsSourceProvenance,
+): PadsDiagnostic => ({
   code: slugifyDiagnosticCode(message),
   severity: "warning",
   category: getDiagnosticCategory(message),
   message,
+  source,
 })
 
 const getStableEntityId = ({
@@ -125,7 +129,9 @@ export const finalizePadsBoardGeometry = (
   )
   const issues =
     geometry.issues ??
-    geometry.diagnostics.map((message) => toStructuredDiagnostic(message))
+    geometry.diagnostics.map((message) =>
+      toStructuredDiagnostic(message, geometry.documentSource),
+    )
   const normalizedEntityCount =
     paths.length +
     circles.length +

@@ -8,9 +8,12 @@
         "@biomejs/biome": "^2.2.4",
         "@types/bun": "latest",
         "bun-match-svg": "^0.0.15",
+        "circuit-json": "0.0.456",
+        "format-si-unit": "0.0.7",
         "sharp": "0.35.3",
         "tsup": "^8.5.0",
         "typescript": "^5",
+        "zod": "3.25.76",
       },
       "peerDependencies": {
         "typescript": "^5",
@@ -225,6 +228,8 @@
 
     "chokidar": ["chokidar@4.0.3", "", { "dependencies": { "readdirp": "^4.0.1" } }, "sha512-Qgzu8kfBvo+cA4962jnP1KkS6Dop5NS6g7R5LFYJr4b8Ub94PPQXUksCw9PvXoeXPRRddRNC5C1JQUR2SMGtnA=="],
 
+    "circuit-json": ["circuit-json@0.0.456", "", { "peerDependencies": { "format-si-unit": "*" } }, "sha512-iqcNnSxr1IOIwB3voMMcylrf1sVq3pQs/EJXeOtPBhdLOVVbe8eo5rXY39LE9535T2ywFv6l8tK1LM630y9JPg=="],
+
     "color-convert": ["color-convert@0.5.3", "", {}, "sha512-RwBeO/B/vZR3dfKL1ye/vx8MHZ40ugzpyfeVG5GsiuGnrlMWe2o8wxBbLCpw9CsxV+wHuzYlCiWnybrIA0ling=="],
 
     "color-diff": ["color-diff@1.4.0", "", {}, "sha512-4oDB/o78lNdppbaqrg0HjOp7pHmUc+dfCxWKWFnQg6AB/1dkjtBDop3RZht5386cq9xBUDRvDvSCA7WUlM9Jqw=="],
@@ -244,6 +249,8 @@
     "fdir": ["fdir@6.5.0", "", { "peerDependencies": { "picomatch": "^3 || ^4" }, "optionalPeers": ["picomatch"] }, "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg=="],
 
     "fix-dts-default-cjs-exports": ["fix-dts-default-cjs-exports@1.0.1", "", { "dependencies": { "magic-string": "^0.30.17", "mlly": "^1.7.4", "rollup": "^4.34.8" } }, "sha512-pVIECanWFC61Hzl2+oOCtoJ3F17kglZC/6N94eRWycFgBH35hHx0Li604ZIzhseh97mf2p0cv7vVrOZGoqhlEg=="],
+
+    "format-si-unit": ["format-si-unit@0.0.7", "", { "peerDependencies": { "typescript": "^5.0.0" } }, "sha512-wTi2TqGqPG9LvUwhshiMlaert+1kWtxMEzIpKIkVbmOz4bopcDtqpDKV06JT6xpGIquOSFbkV1fQoMHq6UJZ1g=="],
 
     "fs-extra": ["fs-extra@8.1.0", "", { "dependencies": { "graceful-fs": "^4.2.0", "jsonfile": "^4.0.0", "universalify": "^0.1.0" } }, "sha512-yhlQgA6mnOJUKOsRUFsgJdQCvkKhcz8tlZG5HBQfReYZy46OwLcY+Zia0mtdHsOo9y/hP+CxMN0TU9QxoOtG4g=="],
 
@@ -330,5 +337,7 @@
     "undici-types": ["undici-types@8.3.0", "", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
 
     "universalify": ["universalify@0.1.2", "", {}, "sha512-rBJeI5CXAlmy1pV+617WB9J63U6XcazHHF2f2dbJix4XzpUF0RS3Zbj0FGIOCAva5P/d/GBOYaACQ1w+0azUkg=="],
+
+    "zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
   }
 }

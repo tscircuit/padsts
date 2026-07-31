@@ -4,6 +4,7 @@ import {
   tokenizePadsAsciiRecord,
 } from "../ascii"
 import type { PadsSourceProvenance } from "../source-provenance"
+import { getPadsDocumentSourceProvenance } from "../source-provenance"
 import { normalizeGeometryUnits } from "./normalize-geometry-units"
 import type {
   PadsBoardGeometry,
@@ -2165,6 +2166,7 @@ export const extractAsciiBoardGeometry = (
     sourceUnits: document.units,
     geometry: {
       sourceFormat: "ascii",
+      documentSource: getPadsDocumentSourceProvenance(document),
       version: document.version,
       sourceUnits: document.units,
       coordinateUnit: "nanometer",

@@ -50,6 +50,10 @@ source value.
 
 ASCII provenance includes section, line, and byte span. Binary provenance
 includes section, optional record index, and byte span. Normalized entities and
-SVG elements retain stable source IDs. Circuit JSON output encodes source IDs
-into its stable element IDs because the current schema does not provide
+SVG elements retain stable source IDs. `PadsBoardGeometry.documentSource`
+provides a whole-document fallback for aggregate diagnostics that cannot be
+assigned to one verified record. Inspection and conversion reports therefore
+attach provenance to every diagnostic; entity-specific conversion diagnostics
+also include the affected stable entity IDs. Circuit JSON output encodes source
+IDs into its stable element IDs because the current schema does not provide
 arbitrary source metadata on every PCB element.

@@ -38,12 +38,12 @@ The central completion rule is:
   - [ ] Recalculate binary directory lengths, record counts, offsets, footer
     size, and checks when a binary document changes.
   - [ ] Add parse → edit → serialize → parse tests for every mutable entity.
-- [ ] Add a shared source-provenance model.
+- [x] Add a shared source-provenance model.
   - [x] Give every decoded ASCII record a section, line, and byte span.
   - [x] Give every decoded binary record a section, record index, and byte
     range.
   - [x] Preserve stable source IDs through normalized geometry and conversion.
-  - [ ] Include source provenance in all warnings and conversion diagnostics.
+  - [x] Include source provenance in all warnings and conversion diagnostics.
 
 ### Units and coordinates
 
@@ -510,10 +510,10 @@ partial and based on a small number of observed record offsets.
   - [x] Debug/coverage view.
   - [x] Arbitrary board-coordinate detail windows for close-up inspection.
 - [x] Use stable, source-linked element IDs and `data-*` attributes.
-- [ ] Add semantic assertions alongside image snapshots.
+- [x] Add semantic assertions alongside image snapshots.
   - [x] Expected layer names and normalized silkscreen/assembly roles for the
     focused decal fixture and real ASCII references.
-  - [ ] Expected entity counts.
+  - [x] Expected entity counts.
     - [x] Assert exact routed-via counts for the LCORE2, Dexter, and EMS4 ASCII
       references.
     - [x] Assert resolved component-pad counts for the LCORE2, Dexter, EMS4,
@@ -522,7 +522,7 @@ partial and based on a small number of observed record offsets.
       LCORE2, Dexter, EMS4, and TMS ASCII references.
     - [x] Assert decoded decal path and circle counts for the LCORE2, Dexter,
       EMS4, and TMS ASCII references.
-  - [ ] Representative coordinates and dimensions.
+  - [x] Representative coordinates and dimensions.
     - [x] Assert representative resolved via sizes, drill sizes, shapes, and
       layer spans.
     - [x] Assert transformed round/slot dimensions, centers, rotations,
@@ -531,7 +531,7 @@ partial and based on a small number of observed record offsets.
       and mirrored sweep direction.
     - [x] Assert representative custom-copper pin association, layer routing,
       exact-arc geometry, polarity, and keepout restriction codes.
-  - [ ] No unexpected decoder diagnostics.
+  - [x] No unexpected decoder diagnostics.
 - [ ] Compare rendered geometry with an independent importer, not only prior
   `padsts` snapshots.
 
@@ -564,7 +564,7 @@ partial and based on a small number of observed record offsets.
 - [ ] Map pours, keepouts, and supported rule data.
 - [x] Preserve PADS source IDs in stable Circuit JSON entity IDs.
 - [ ] Emit warnings for every approximation or skipped entity.
-- [ ] Validate generated Circuit JSON against the current schema.
+- [x] Validate generated Circuit JSON against the current schema.
 - [ ] Render generated Circuit JSON and compare it with the PADS SVG.
 - [ ] Generate Gerber/Excellon files from converted Circuit JSON and compare
   them with known-good fabrication output.
@@ -602,11 +602,11 @@ partial and based on a small number of observed record offsets.
   snapshots for the real ASCII reference boards.
 - [x] Require each new geometry-decoder increment to add or update focused
   close-up snapshots that expose the affected features at inspectable scale.
-- [ ] Add a typed expected-results manifest for every fixture.
+- [x] Add a typed expected-results manifest for every fixture.
   - [x] Units and layer count.
   - [x] Board/debug extents when decoded.
   - [x] Component, pad, net, trace, via, text, outline, and decoded-pour counts.
-  - [ ] Representative named entities and coordinates.
+  - [x] Representative named entities and coordinates.
   - [x] Expected diagnostics and decode coverage.
 - [ ] Add small synthetic ASCII fixtures for every record type and edge case.
   - [x] Cover top/interior/bottom via pads, partial spans, and explicit

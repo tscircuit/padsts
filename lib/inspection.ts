@@ -11,6 +11,7 @@ import {
   type PadsGeometryPoint,
 } from "./geometry"
 import { type PadsDocument, parsePads } from "./parse-pads"
+import { getPadsDocumentSourceProvenance } from "./source-provenance"
 import { convertPadsCoordinateToNanometers } from "./units"
 
 export interface PadsInspectionEntityCounts {
@@ -261,13 +262,18 @@ export const inspectPads = (
     document.kind === "binary"
       ? sections.reduce((total, section) => total + section.byteLength, 0)
       : 0
+  const documentSource = getPadsDocumentSourceProvenance(document)
   const diagnostics = [
     ...getDocumentDiagnostics(document),
     ...(geometry.issues ?? []),
-  ]
+  ].map((diagnostic) =>
+    diagnostic.source ? diagnostic : { ...diagnostic, source: documentSource },
+  )
   if (document.kind === "binary") {
     for (const section of sections) {
       if (section.status === "opaque") {
+        const sectionIndex = Number(section.id.split(":")[1])
+        const binarySection = document.getSection(sectionIndex)
         diagnostics.push({
           code: "binary-unsupported-section",
           severity: "warning",
@@ -276,8 +282,13 @@ export const inspectPads = (
           source: {
             format: "binary",
             sourceId: section.id,
-            sectionIndex: Number(section.id.split(":")[1]),
-            span: { startOffset: 0, endOffset: section.byteLength },
+            sectionIndex,
+            span: {
+              startOffset: binarySection?.directoryEntry.sectionOffset ?? 0,
+              endOffset:
+                (binarySection?.directoryEntry.sectionOffset ?? 0) +
+                section.byteLength,
+            },
           },
         })
       }

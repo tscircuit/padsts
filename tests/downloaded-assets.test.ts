@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { any_circuit_element } from "circuit-json"
 import {
   detectPadsFormat,
   extractPadsBoardGeometry,
   inspectPads,
   parsePads,
+  toCircuitJson,
 } from "../lib"
 import {
   calculateGitBlobSha,
@@ -42,11 +44,62 @@ describe("downloaded PADS fixtures", () => {
         const document = parsePads(sourceBytes)
         expect(document.kind).toBe(asset.format)
 
+        for (const [index, element] of toCircuitJson(document).entries()) {
+          const result = any_circuit_element.safeParse(element)
+          if (!result.success) {
+            throw new Error(
+              `${asset.id} Circuit JSON element ${index} (${element.type}) failed schema validation: ${result.error.message}`,
+            )
+          }
+        }
+
         const expected = expectedResultsByAssetId[asset.id]
         expect(expected).toBeDefined()
         if (expected) {
           const geometry = extractPadsBoardGeometry(document)
           const inspection = inspectPads(document)
+          const { representative, ...expectedSummary } = expected
+          if (representative.kind === "placement") {
+            const placement = geometry.placements.find(
+              ({ reference }) => reference === representative.reference,
+            )
+            expect(placement?.location).toMatchObject({
+              x: representative.x,
+              y: representative.y,
+            })
+          } else if (representative.kind === "path") {
+            const path = geometry.paths.find(
+              ({ kind, name, netName }) =>
+                kind === representative.pathKind &&
+                name === representative.name &&
+                netName === representative.netName,
+            )
+            expect(path?.points[representative.pointIndex]).toMatchObject({
+              x: representative.x,
+              y: representative.y,
+            })
+          } else {
+            const vertex = geometry.unassignedVertices.find(
+              ({ id }) => id === representative.id,
+            )
+            expect(vertex).toMatchObject({
+              x: representative.x,
+              y: representative.y,
+            })
+          }
+          const diagnosticCodes = Object.fromEntries(
+            [...new Set(inspection.diagnostics.map(({ code }) => code))].map(
+              (code) => [
+                code,
+                inspection.diagnostics.filter(
+                  (diagnostic) => diagnostic.code === code,
+                ).length,
+              ],
+            ),
+          )
+          expect(
+            inspection.diagnostics.every(({ source }) => source !== undefined),
+          ).toBe(true)
           const actualBounds = inspection.bounds
             ? [
                 inspection.bounds.minimumX,
@@ -78,6 +131,7 @@ describe("downloaded PADS fixtures", () => {
               pours: 0,
             },
             diagnosticCount: inspection.diagnostics.length,
+            diagnosticCodes,
             coverage: {
               sourceRecords: inspection.coverage.sourceRecordCount,
               partiallyDecodedRecords:
@@ -88,7 +142,7 @@ describe("downloaded PADS fixtures", () => {
                 inspection.coverage.partiallyDecodedBinaryBytes,
               opaqueBytes: inspection.coverage.opaqueBinaryBytes,
             },
-          }).toEqual(expected)
+          }).toEqual(expectedSummary)
         }
 
         if (asset.format === "binary" && document.kind === "binary") {

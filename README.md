@@ -168,9 +168,12 @@ const report = createPadsConversionReport(sourceBytes, { strict: true })
 
 Inspection and report objects are JSON-serializable and schema-versioned.
 Strict conversion refuses unsupported, malformed, approximate, inferred,
-opaque, or unaccounted source data. Circuit JSON output currently maps verified
+opaque, or unaccounted source data. Every report diagnostic includes source
+provenance; normalized entities skipped by the Circuit JSON adapter are listed
+with their stable entity IDs. Circuit JSON output currently maps verified
 line-only board outlines, components with decoded extents, pads, holes, vias,
-straight traces, and straight silkscreen paths. Output was checked against
+straight traces, and straight silkscreen paths. CI validates every emitted
+element from the synthetic and pinned real-world fixtures against
 `circuit-json@0.0.456`; the adapter remains experimental while nets, pours,
 thermal relief, and complete binary geometry are unfinished.
 

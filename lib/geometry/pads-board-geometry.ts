@@ -178,6 +178,7 @@ export interface PadsGeometryCoverage {
 
 export interface PadsBoardGeometry {
   sourceFormat: PadsFormat
+  documentSource: PadsSourceProvenance
   version: string
   sourceUnits: PadsAsciiUnits
   coordinateUnit: PadsInternalCoordinateUnit
