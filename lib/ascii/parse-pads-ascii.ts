@@ -8,6 +8,15 @@ interface LineSpan {
   sectionName?: string
 }
 
+const getSectionName = (lineText: string): string | undefined => {
+  const contentText = lineText.replace(/(?:\r\n|\r|\n)$/u, "").trim()
+  const padsHeaderMatch = /^!(PADS-POWERPCB-[^!]+)!/u.exec(contentText)
+  if (padsHeaderMatch?.[1]) return padsHeaderMatch[1]
+
+  const sectionHeaderMatch = /^\*([^*\s]+)\*/u.exec(contentText)
+  return sectionHeaderMatch?.[1]
+}
+
 const readLineSpans = (sourceText: string): LineSpan[] => {
   const lineSpans: LineSpan[] = []
   let startOffset = 0
@@ -32,16 +41,11 @@ const readLineSpans = (sourceText: string): LineSpan[] => {
     }
 
     const lineText = sourceText.slice(startOffset, endOffset)
-    const contentText = lineText.replace(/(?:\r\n|\r|\n)$/u, "").trim()
-    const isHeader =
-      contentText.length >= 3 &&
-      contentText.startsWith("*") &&
-      contentText.endsWith("*")
-    const innerText = isHeader ? contentText.slice(1, -1) : ""
-    const sectionName =
-      innerText.length > 0 && !/\s/u.test(innerText) ? innerText : undefined
-
-    lineSpans.push({ startOffset, endOffset, sectionName })
+    lineSpans.push({
+      startOffset,
+      endOffset,
+      sectionName: getSectionName(lineText),
+    })
     startOffset = endOffset
   }
 
@@ -62,7 +66,10 @@ const parseVersionHeader = (
 
 export const isPadsAsciiText = (sourceText: string): boolean => {
   const beginningText = sourceText.slice(0, 512).trimStart()
-  return beginningText.startsWith("*PADS-POWERPCB-")
+  return (
+    beginningText.startsWith("!PADS-POWERPCB-") ||
+    beginningText.startsWith("*PADS-POWERPCB-")
+  )
 }
 
 export const parsePadsAscii = (sourceText: string): PadsAsciiDocument => {

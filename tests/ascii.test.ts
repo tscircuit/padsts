@@ -43,4 +43,22 @@ describe("PADS ASCII", () => {
     expect(document.units).toBe("METRIC")
     expect(document.getString()).toBe(sourceText)
   })
+
+  test("parses the standard bang header and annotated section headers", () => {
+    const sourceText =
+      "!PADS-POWERPCB-V2005.0-BASIC! DESIGN DATABASE ASCII FILE 1.0\n" +
+      "*PCB*        GENERAL PARAMETERS OF THE PCB DESIGN\n" +
+      "UNITS 1\n" +
+      "*END*     OF ASCII OUTPUT FILE\n"
+    const document = parsePadsAscii(sourceText)
+
+    expect(document.version).toBe("V2005.0")
+    expect(document.units).toBe("BASIC")
+    expect(document.sections.map((section) => section.name)).toEqual([
+      "PADS-POWERPCB-V2005.0-BASIC",
+      "PCB",
+      "END",
+    ])
+    expect(document.getString()).toBe(sourceText)
+  })
 })

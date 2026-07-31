@@ -1,4 +1,6 @@
 export * from "./ascii"
 export * from "./binary"
+export * from "./geometry"
 export * from "./parse-error"
 export * from "./parse-pads"
+export * from "./svg"

@@ -25,6 +25,9 @@
   "scripts": {
     "build": "tsup-node lib/index.ts --format esm --dts",
     "test": "bun test",
+    "test:assets": "bun test tests/downloaded-assets.test.ts",
+    "test:download-assets": "bun run scripts/download-test-assets.ts",
+    "test:svg": "bun test tests/svg",
     "typecheck": "bunx tsc --noEmit",
     "format": "biome check --write .",
     "format:check": "biome check .",
@@ -33,10 +36,15 @@
   "devDependencies": {
     "@biomejs/biome": "^2.2.4",
     "@types/bun": "latest",
+    "bun-match-svg": "^0.0.15",
+    "sharp": "0.35.3",
     "tsup": "^8.5.0",
     "typescript": "^5"
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "overrides": {
+    "sharp": "0.35.3"
   }
 }
