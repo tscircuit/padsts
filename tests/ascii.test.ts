@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  convertPadsCoordinateToNanometers,
   detectPadsFormat,
   extractPadsBoardGeometry,
   generateSvgFromPads,
@@ -9,8 +10,44 @@ import {
 } from "../lib"
 
 const fixtureUrl = new URL("./fixtures/minimal.asc", import.meta.url)
+const basic = (coordinate: number): number =>
+  convertPadsCoordinateToNanometers(coordinate, "BASIC")
+const mils = (coordinate: number): number =>
+  convertPadsCoordinateToNanometers(coordinate, "MILS")
 
 describe("PADS ASCII", () => {
+  test("parses typed board setup fields while retaining every setting", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-MILS! DESIGN DATABASE ASCII FILE 1.0",
+      "*PCB*",
+      "ORIGIN -12.5 20",
+      "MAXIMUMLAYER 6",
+      "LINEWIDTH 8",
+      "PSVIAGRID 5 10",
+      "USERGRID 2.5 2.5",
+      'JOBNAME "RK3326 reference"',
+      "FUTURE_SETUP 1 2 3",
+      "*END*",
+      "",
+    ].join("\n")
+    const setup = parsePadsAscii(sourceText).boardSetup
+
+    expect(setup).toMatchObject({
+      units: "MILS",
+      coordinatePrecision: 0.01,
+      origin: { x: -12.5, y: 20 },
+      maximumLayer: 6,
+      defaultTraceWidth: 8,
+      viaGrid: { x: 5, y: 10 },
+      userGrid: { x: 2.5, y: 2.5 },
+      jobName: "RK3326 reference",
+      settings: {
+        FUTURE_SETUP: [["1", "2", "3"]],
+      },
+    })
+    expect(setup.sourceRecords).toHaveLength(7)
+  })
+
   test("parses sections and round-trips the original source", async () => {
     const sourceText = await Bun.file(fixtureUrl).text()
     const document = parsePadsAscii(sourceText)
@@ -64,6 +101,90 @@ describe("PADS ASCII", () => {
     expect(document.getString()).toBe(sourceText)
   })
 
+  test("keeps nested route markers inside their top-level section", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-MILS! DESIGN DATABASE ASCII FILE 1.0",
+      "*ROUTE*",
+      "*REMARK* route fields",
+      '*SIGNAL* "NET WITH SPACES"',
+      '"U1.1" "" "U2.1"',
+      "*END*",
+      "",
+    ].join("\n")
+    const document = parsePadsAscii(sourceText)
+    const routeSection = document.getSection("ROUTE")
+
+    expect(document.sections.map((section) => section.name)).toEqual([
+      "PADS-POWERPCB-V9.5-MILS",
+      "ROUTE",
+      "END",
+    ])
+    expect(routeSection?.records.map((record) => record.kind)).toEqual([
+      "remark",
+      "nested-header",
+      "data",
+    ])
+    expect(
+      routeSection?.records[1]?.tokens.map((token) => token.value),
+    ).toEqual(["*SIGNAL*", "NET WITH SPACES"])
+    expect(
+      routeSection?.records[2]?.tokens.map((token) => token.value),
+    ).toEqual(["U1.1", "", "U2.1"])
+    expect(routeSection?.records[2]?.tokens[1]).toMatchObject({
+      quoted: true,
+      rawText: '""',
+    })
+    expect(document.coverage.recordsByKind).toMatchObject({
+      remark: 1,
+      "nested-header": 1,
+      data: 1,
+    })
+    expect(document.getString()).toBe(sourceText)
+  })
+
+  test("re-emits edited ASCII records without changing unrelated text", async () => {
+    const sourceText = await Bun.file(fixtureUrl).text()
+    const document = parsePadsAscii(sourceText)
+    const pcbSection = document.getSection("PCB")
+    const unitsRecord = pcbSection?.records.find(
+      (record) => record.tokens[0]?.value === "UNITS",
+    )
+    expect(pcbSection).toBeDefined()
+    expect(unitsRecord).toBeDefined()
+
+    const editedSection = pcbSection?.withRecords(
+      pcbSection.records.map((record) =>
+        record === unitsRecord ? record.withTokens(["UNITS", "1"]) : record,
+      ),
+    )
+    const editedDocument =
+      pcbSection && editedSection
+        ? document.replaceSection(pcbSection, editedSection)
+        : document
+
+    expect(editedDocument.getString()).toBe(
+      sourceText.replace("UNITS 0", "UNITS 1"),
+    )
+    expect(parsePadsAscii(editedDocument.getString()).getString()).toBe(
+      editedDocument.getString(),
+    )
+    expect(document.getString()).toBe(sourceText)
+  })
+
+  test("diagnoses a missing ASCII terminator without blocking inspection", () => {
+    const document = parsePadsAscii(
+      "*PADS-POWERPCB-V9.5-BASIC*\n*PCB*\nUNITS 0\n",
+    )
+
+    expect(document.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "ascii-missing-end",
+        severity: "warning",
+        category: "validation",
+      }),
+    ])
+  })
+
   test("omits layer-0 ratlines and thermal flags from fabrication geometry", () => {
     const sourceText = [
       "!PADS-POWERPCB-V9.5-BASIC! DESIGN DATABASE ASCII FILE 1.0",
@@ -88,7 +209,7 @@ describe("PADS ASCII", () => {
       layer: 1,
       points: [
         { x: 0, y: 0 },
-        { x: 100, y: 0 },
+        { x: basic(100), y: 0 },
       ],
     })
     expect(geometry.circles).toEqual([])
@@ -124,18 +245,18 @@ describe("PADS ASCII", () => {
       kind: "route",
       layer: 1,
       netName: "CW_ARC",
-      width: 10,
+      width: mils(10),
       points: [
         { x: 0, y: 0 },
-        { x: 100, y: 0 },
+        { x: mils(100), y: 0 },
       ],
       segments: [
         {
           kind: "arc",
           start: { x: 0, y: 0 },
-          end: { x: 100, y: 0 },
-          center: { x: 50, y: 0 },
-          radius: 50,
+          end: { x: mils(100), y: 0 },
+          center: { x: mils(50), y: 0 },
+          radius: mils(50),
           startAngle: 180,
           deltaAngle: -180,
         },
@@ -145,12 +266,12 @@ describe("PADS ASCII", () => {
       kind: "route",
       layer: 1,
       netName: "CCW_ARC",
-      width: 12,
+      width: mils(12),
       segments: [
         {
           kind: "arc",
-          center: { x: 50, y: 100 },
-          radius: 50,
+          center: { x: mils(50), y: mils(100) },
+          radius: mils(50),
           startAngle: 180,
           deltaAngle: 180,
         },
@@ -225,35 +346,37 @@ describe("PADS ASCII", () => {
     expect(geometry.circles).toHaveLength(3)
     expect(geometry.circles[0]).toMatchObject({
       kind: "via",
-      center: { x: 100, y: 0 },
-      radius: 35,
-      drillRadius: 10,
+      center: { x: mils(100), y: 0 },
+      radius: mils(35),
+      drillRadius: mils(10),
       shape: "circle",
       copperPads: [
-        { layer: 1, radius: 20, shape: "circle" },
-        { layer: 2, radius: 35, shape: "square" },
-        { layer: 4, radius: 25, shape: "circle" },
+        { layer: 1, radius: mils(20), shape: "circle" },
+        { layer: 2, radius: mils(35), shape: "square" },
+        { layer: 4, radius: mils(25), shape: "circle" },
       ],
       startLayer: 1,
       endLayer: 4,
-      width: 25,
+      width: mils(25),
       name: "ROUNDVIA",
       netName: "ROUND_NET",
     })
     expect(geometry.circles[1]).toMatchObject({
       kind: "via",
-      center: { x: 100, y: 100 },
-      radius: 15,
-      drillRadius: 5,
+      center: { x: mils(100), y: mils(100) },
+      radius: mils(15),
+      drillRadius: mils(5),
       shape: "square",
-      copperPads: [{ layer: 2, radius: 15, shape: "square" }],
+      copperPads: [{ layer: 2, radius: mils(15), shape: "square" }],
       startLayer: 2,
       endLayer: 3,
-      width: 10,
+      width: mils(10),
       name: "SQUAREVIA",
       netName: "SQUARE_NET",
     })
-    expect(geometry.unverifiedViaLocations).toEqual([{ x: 300, y: 300 }])
+    expect(
+      geometry.unverifiedViaLocations.map(({ x, y }) => ({ x, y })),
+    ).toEqual([{ x: mils(300), y: mils(300) }])
     expect(geometry.diagnostics).toContain(
       "1 ASCII via instances reference missing pad-stack definitions (MISSINGVIA)",
     )
@@ -263,11 +386,15 @@ describe("PADS ASCII", () => {
     expect(svg).toContain('<rect id="pads-via-aperture-')
     expect(svg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(6)
     expect(svg.match(/data-name="SQUAREVIA"/gu)).toHaveLength(1)
-    expect(svg).toContain('cx="100" cy="0" r="10"/>')
-    expect(svg).toContain('cx="100" cy="100" r="5"/>')
+    expect(svg).toContain(`cx="${mils(100)}" cy="0" r="${mils(10)}"/>`)
+    expect(svg).toContain(
+      `cx="${mils(100)}" cy="${mils(100)}" r="${mils(5)}"/>`,
+    )
     expect(bottomCopperSvg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(2)
     expect(bottomCopperSvg).not.toContain('data-name="SQUAREVIA"')
-    expect(bottomCopperSvg).not.toContain('cx="100" cy="100" r="5"/>')
+    expect(bottomCopperSvg).not.toContain(
+      `cx="${mils(100)}" cy="${mils(100)}" r="${mils(5)}"/>`,
+    )
     expect(firstInnerCopperSvg.match(/data-pad-layer="2"/gu)).toHaveLength(3)
     expect(firstInnerCopperSvg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(2)
     expect(firstInnerCopperSvg.match(/data-name="SQUAREVIA"/gu)).toHaveLength(1)
@@ -283,11 +410,11 @@ describe("PADS ASCII", () => {
     ].join("\n")
     const geometry = extractPadsBoardGeometry(parsePadsAscii(sourceText))
 
-    expect(geometry.placements).toEqual([
+    expect(geometry.placements).toMatchObject([
       {
         reference: "C6",
         footprintName: "0402",
-        location: { x: 1250, y: -2500 },
+        location: { x: basic(1250), y: basic(-2500) },
         rotation: 90,
         bottomLayer: false,
       },
@@ -322,11 +449,11 @@ describe("PADS ASCII", () => {
     expect(
       geometry.placements.map((placement) => placement.footprintName),
     ).toEqual(["TEST_DECAL", "TEST_DECAL"])
-    expect(geometry.pads).toEqual([
+    expect(geometry.pads).toMatchObject([
       {
-        center: { x: 100, y: 192 },
-        width: 12,
-        height: 8,
+        center: { x: mils(100), y: mils(192) },
+        width: mils(12),
+        height: mils(8),
         shape: "rect",
         rotation: 90,
         layer: 1,
@@ -335,9 +462,9 @@ describe("PADS ASCII", () => {
         decalName: "TEST_DECAL",
       },
       {
-        center: { x: 100, y: 212 },
-        width: 12,
-        height: 8,
+        center: { x: mils(100), y: mils(212) },
+        width: mils(12),
+        height: mils(8),
         shape: "rect",
         rotation: 90,
         layer: 1,
@@ -346,9 +473,9 @@ describe("PADS ASCII", () => {
         decalName: "TEST_DECAL",
       },
       {
-        center: { x: 308, y: 200 },
-        width: 12,
-        height: 8,
+        center: { x: mils(308), y: mils(200) },
+        width: mils(12),
+        height: mils(8),
         shape: "rect",
         rotation: 180,
         layer: 2,
@@ -357,9 +484,9 @@ describe("PADS ASCII", () => {
         decalName: "TEST_DECAL",
       },
       {
-        center: { x: 288, y: 200 },
-        width: 12,
-        height: 8,
+        center: { x: mils(288), y: mils(200) },
+        width: mils(12),
+        height: mils(8),
         shape: "rect",
         rotation: 180,
         layer: 2,
@@ -405,7 +532,10 @@ describe("PADS ASCII", () => {
       true,
     )
     expect(geometry.holes).toHaveLength(2)
-    expect(geometry.holes.map((hole) => hole.width)).toEqual([12, 10])
+    expect(geometry.holes.map((hole) => hole.width)).toEqual([
+      mils(12),
+      mils(10),
+    ])
     expect(geometry.holes.map((hole) => hole.plated)).toEqual([true, false])
     expect(geometry.diagnostics).toEqual([])
   })

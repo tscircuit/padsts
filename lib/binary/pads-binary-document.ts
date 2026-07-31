@@ -60,6 +60,38 @@ export class PadsBinaryDirectoryEntry {
   getBytes(): Uint8Array {
     return this.bytes.slice()
   }
+
+  withLayout({
+    recordCount = this.recordCount,
+    byteLength = this.byteLength,
+    sectionOffset = this.sectionOffset,
+  }: {
+    recordCount?: number
+    byteLength?: number
+    sectionOffset?: number
+  }): PadsBinaryDirectoryEntry {
+    if (
+      !Number.isSafeInteger(recordCount) ||
+      recordCount < 0 ||
+      recordCount > 0xffff_ffff ||
+      !Number.isSafeInteger(byteLength) ||
+      byteLength < 0 ||
+      byteLength > 0xffff_ffff
+    ) {
+      throw new RangeError("Invalid PADS binary directory entry layout")
+    }
+    const bytes = this.bytes.slice()
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    view.setUint32(0, recordCount, true)
+    view.setUint32(4, byteLength, true)
+    return new PadsBinaryDirectoryEntry({
+      bytes,
+      index: this.index,
+      recordCount,
+      byteLength,
+      sectionOffset,
+    })
+  }
 }
 
 export interface PadsBinarySectionInit {
@@ -109,11 +141,30 @@ export class PadsBinaryFooter {
   getBytes(): Uint8Array {
     return this.bytes.slice()
   }
+
+  withStoredFileBodySize(storedFileBodySize: number): PadsBinaryFooter {
+    if (
+      !Number.isSafeInteger(storedFileBodySize) ||
+      storedFileBodySize < 0 ||
+      storedFileBodySize > 0xffff_ffff
+    ) {
+      throw new RangeError("Invalid PADS binary footer body size")
+    }
+    const bytes = this.bytes.slice()
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    view.setUint32(42, storedFileBodySize, true)
+    return new PadsBinaryFooter({
+      bytes,
+      guidText: this.guidText,
+      storedFileBodySize,
+    })
+  }
 }
 
 export type PadsBinaryDiagnosticCode =
   | "footer-guid-mismatch"
   | "footer-size-mismatch"
+  | "fixed-record-size-mismatch"
 
 export interface PadsBinaryDiagnostic {
   code: PadsBinaryDiagnosticCode
@@ -188,5 +239,77 @@ export class PadsBinaryDocument {
       this.trailingBytes,
       this.footer.getBytes(),
     ])
+  }
+
+  withSectionBytes(
+    index: number,
+    bytes: Uint8Array,
+    { recordCount }: { recordCount?: number } = {},
+  ): PadsBinaryDocument {
+    if (
+      !Number.isInteger(index) ||
+      index <= 0 ||
+      index >= this.sections.length
+    ) {
+      throw new RangeError(`Invalid mutable PADS binary section index ${index}`)
+    }
+
+    const updatedSections = this.sections.map((section) =>
+      section.index === index
+        ? new PadsBinarySection({
+            directoryEntry: section.directoryEntry,
+            bytes,
+          })
+        : section,
+    )
+    const directoryByteLength = this.directoryEntries.reduce(
+      (total, entry) => total + entry.bytes.byteLength,
+      0,
+    )
+    let sectionOffset = this.header.bytes.byteLength + directoryByteLength
+    const updatedDirectoryEntries = this.directoryEntries.map((entry) => {
+      if (entry.index === 0) return entry.withLayout({ sectionOffset: 0 })
+      const section = updatedSections[entry.index]
+      const updatedEntry = entry.withLayout({
+        recordCount:
+          entry.index === index
+            ? (recordCount ?? entry.recordCount)
+            : undefined,
+        byteLength: section?.bytes.byteLength ?? 0,
+        sectionOffset,
+      })
+      sectionOffset += updatedEntry.byteLength
+      return updatedEntry
+    })
+    const sectionsWithUpdatedEntries = updatedSections.map(
+      (section, sectionIndex) =>
+        new PadsBinarySection({
+          directoryEntry:
+            updatedDirectoryEntries[sectionIndex] ?? section.directoryEntry,
+          bytes: section.bytes,
+        }),
+    )
+    const storedFileBodySize = sectionOffset + this.trailingBytes.byteLength
+
+    return new PadsBinaryDocument({
+      header: this.header,
+      directoryEntries: updatedDirectoryEntries,
+      sections: sectionsWithUpdatedEntries,
+      trailingBytes: this.trailingBytes,
+      footer: this.footer.withStoredFileBodySize(storedFileBodySize),
+      diagnostics: [],
+    })
+  }
+
+  editSectionBytes(
+    index: number,
+    update: (bytes: Uint8Array) => Uint8Array,
+    options: { recordCount?: number } = {},
+  ): PadsBinaryDocument {
+    const section = this.getSection(index)
+    if (!section) {
+      throw new RangeError(`Missing mutable PADS binary section ${index}`)
+    }
+    return this.withSectionBytes(index, update(section.getBytes()), options)
   }
 }

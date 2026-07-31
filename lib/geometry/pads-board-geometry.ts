@@ -1,8 +1,14 @@
+import type { PadsAsciiUnits } from "../ascii"
+import type { PadsDiagnostic } from "../diagnostics"
 import type { PadsFormat } from "../parse-pads"
+import type { PadsSourceProvenance } from "../source-provenance"
+import type { PadsInternalCoordinateUnit } from "../units"
 
 export interface PadsGeometryPoint {
   x: number
   y: number
+  id?: string
+  source?: PadsSourceProvenance
 }
 
 export interface PadsGeometryLineSegment {
@@ -33,6 +39,8 @@ export type PadsGeometryPathKind =
   | "drawing"
 
 export interface PadsGeometryPath {
+  id?: string
+  source?: PadsSourceProvenance
   kind: PadsGeometryPathKind
   points: PadsGeometryPoint[]
   segments?: PadsGeometryPathSegment[]
@@ -60,6 +68,8 @@ export interface PadsGeometryViaPad {
 }
 
 export interface PadsGeometryCircle {
+  id?: string
+  source?: PadsSourceProvenance
   kind: PadsGeometryCircleKind
   center: PadsGeometryPoint
   radius: number
@@ -83,6 +93,8 @@ export interface PadsGeometryCircle {
 }
 
 export interface PadsGeometryText {
+  id?: string
+  source?: PadsSourceProvenance
   content: string
   location: PadsGeometryPoint
   height: number
@@ -93,6 +105,8 @@ export interface PadsGeometryText {
 }
 
 export interface PadsGeometryPlacement {
+  id?: string
+  source?: PadsSourceProvenance
   reference: string
   footprintName?: string
   location: PadsGeometryPoint
@@ -101,6 +115,8 @@ export interface PadsGeometryPlacement {
 }
 
 export interface PadsGeometryPad {
+  id?: string
+  source?: PadsSourceProvenance
   center: PadsGeometryPoint
   width: number
   height: number
@@ -115,6 +131,8 @@ export interface PadsGeometryPad {
 }
 
 export interface PadsGeometryHole {
+  id?: string
+  source?: PadsSourceProvenance
   center: PadsGeometryPoint
   width: number
   height: number
@@ -150,9 +168,19 @@ export interface PadsBinarySectionSummary {
   bytesPerRecord: number
 }
 
+export interface PadsGeometryCoverage {
+  normalizedEntityCount: number
+  entitiesWithProvenance: number
+  entitiesWithoutProvenance: number
+  binarySectionCount: number
+  binaryByteLength: number
+}
+
 export interface PadsBoardGeometry {
   sourceFormat: PadsFormat
   version: string
+  sourceUnits: PadsAsciiUnits
+  coordinateUnit: PadsInternalCoordinateUnit
   layerCount: number
   layers: PadsGeometryLayerInfo[]
   paths: PadsGeometryPath[]
@@ -166,4 +194,6 @@ export interface PadsBoardGeometry {
   unverifiedViaLocations: PadsGeometryPoint[]
   binarySections: PadsBinarySectionSummary[]
   diagnostics: string[]
+  issues?: PadsDiagnostic[]
+  coverage?: PadsGeometryCoverage
 }

@@ -105,4 +105,43 @@ describe("PADS native binary", () => {
     ])
     expect(document.getBytes()).toEqual(sourceBytes)
   })
+
+  test("rebuilds directory and footer sizes after an opaque section edit", () => {
+    const document = parsePadsBinary(createMinimalBinaryFixture())
+    const editedDocument = document.withSectionBytes(
+      1,
+      new Uint8Array([9, 8, 7, 6, 5, 4]),
+      { recordCount: 2 },
+    )
+    const reparsedDocument = parsePadsBinary(editedDocument.getBytes())
+
+    expect(reparsedDocument.getSection(1)?.recordCount).toBe(2)
+    expect(reparsedDocument.getSection(1)?.getBytes()).toEqual(
+      new Uint8Array([9, 8, 7, 6, 5, 4]),
+    )
+    expect(reparsedDocument.directoryEntries[1]).toMatchObject({
+      byteLength: 6,
+      recordCount: 2,
+    })
+    expect(reparsedDocument.footer.storedFileBodySize).toBe(
+      editedDocument.getBytes().byteLength - PADS_BINARY_FOOTER_SIZE,
+    )
+    expect(reparsedDocument.diagnostics).toEqual([])
+  })
+
+  test("diagnoses fixed-layout record count and byte-length mismatches", () => {
+    const document = parsePadsBinary(createMinimalBinaryFixture())
+    const editedDocument = document.withSectionBytes(12, new Uint8Array(13), {
+      recordCount: 2,
+    })
+    const reparsedDocument = parsePadsBinary(editedDocument.getBytes())
+
+    expect(reparsedDocument.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "fixed-record-size-mismatch",
+        offset: PADS_BINARY_HEADER_SIZE + 12 * PADS_BINARY_DIRECTORY_ENTRY_SIZE,
+      }),
+    )
+    expect(reparsedDocument.getBytes()).toEqual(editedDocument.getBytes())
+  })
 })

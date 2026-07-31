@@ -11,6 +11,7 @@ import {
   type PadsGeometryViaPad,
 } from "../geometry"
 import { type PadsDocument, parsePads } from "../parse-pads"
+import { getPadsNanometersPerSourceUnit } from "../units"
 
 export interface PadsSvgBoardViewBox {
   /** Minimum X coordinate in the PADS board coordinate system. */
@@ -25,10 +26,16 @@ export interface GeneratePadsSvgOptions {
   width?: number
   height?: number
   /**
-   * Optional zoom window in native board coordinates. `x` and `y` identify
-   * the lower-left corner before the renderer's global SVG Y-axis flip.
+   * Optional zoom window in normalized nanometer coordinates by default.
+   * `x` and `y` identify the lower-left corner before the renderer's global
+   * SVG Y-axis flip.
    */
   viewBox?: PadsSvgBoardViewBox
+  /**
+   * Interpret `viewBox` in the document's original PADS coordinate units
+   * instead of normalized nanometers.
+   */
+  viewBoxUnits?: "normalized" | "source"
   backgroundColor?: string
   boardColor?: string
   drillColor?: string
@@ -340,6 +347,32 @@ const getRequestedBounds = (viewBox: PadsSvgBoardViewBox): GeometryBounds => {
   }
 }
 
+const normalizeRequestedViewBox = ({
+  geometry,
+  viewBox,
+  viewBoxUnits,
+}: {
+  geometry: PadsBoardGeometry
+  viewBox: PadsSvgBoardViewBox
+  viewBoxUnits: NonNullable<GeneratePadsSvgOptions["viewBoxUnits"]>
+}): PadsSvgBoardViewBox => {
+  if (viewBoxUnits === "normalized") return viewBox
+
+  const scale = getPadsNanometersPerSourceUnit(geometry.sourceUnits)
+  if (scale === undefined) {
+    throw new RangeError(
+      "Cannot use source-coordinate SVG viewBox when PADS source units are unknown",
+    )
+  }
+
+  return {
+    x: viewBox.x * scale,
+    y: viewBox.y * scale,
+    width: viewBox.width * scale,
+    height: viewBox.height * scale,
+  }
+}
+
 const pointInsideBounds = ({
   point,
   bounds,
@@ -481,7 +514,47 @@ const shouldRenderLayer = (
   context.visibleGerberLayers === undefined ||
   context.visibleGerberLayers.has(layerName)
 
+const getCopperMaskId = (layerName: string): string =>
+  `pads-${layerName.replace(/[^A-Za-z0-9_.:-]+/gu, "-")}-polarity-mask`
+
+const getCopperMaskAttribute = (
+  context: RenderContext,
+  layerName: string,
+): string => {
+  const hasNegativeGeometry =
+    context.geometry.paths.some((path) => {
+      if (path.kind !== "copper" || path.polarity !== "negative") return false
+      return (
+        (path.gerberLayer ??
+          getGerberCopperLayerName({
+            geometry: context.geometry,
+            layer: path.layer,
+          })) === layerName
+      )
+    }) ||
+    context.geometry.circles.some((circle) => {
+      if (circle.kind !== "copper" || circle.polarity !== "negative") {
+        return false
+      }
+      return (
+        (circle.gerberLayer ??
+          getGerberCopperLayerName({
+            geometry: context.geometry,
+            layer: circle.layer,
+          })) === layerName
+      )
+    })
+  return hasNegativeGeometry
+    ? ` mask="url(#${getCopperMaskId(layerName)})"`
+    : ""
+}
+
+const getSvgEntityId = (id: string): string =>
+  `pads-entity-${id.replace(/[^A-Za-z0-9_.:-]+/gu, "-")}`
+
 const getMetadataAttributes = ({
+  id,
+  source,
   kind,
   layer,
   gerberLayer,
@@ -495,6 +568,8 @@ const getMetadataAttributes = ({
   restrictions,
   groupId,
 }: {
+  id?: string
+  source?: { sourceId: string }
   kind: string
   layer?: number | string
   gerberLayer?: string
@@ -509,6 +584,8 @@ const getMetadataAttributes = ({
   groupId?: string
 }): string =>
   [
+    id ? `id="${escapeXml(getSvgEntityId(id))}"` : "",
+    source ? `data-source-id="${escapeXml(source.sourceId)}"` : "",
     `data-kind="${escapeXml(kind)}"`,
     layer !== undefined ? `data-pads-layer="${escapeXml(String(layer))}"` : "",
     gerberLayer ? `data-gerber-layer-name="${escapeXml(gerberLayer)}"` : "",
@@ -548,7 +625,12 @@ const getRenderedStrokeWidth = ({
 const renderCopperPaths = (context: RenderContext): string => {
   const pathsByLayer = new Map<string, PadsGeometryPath[]>()
   for (const path of context.geometry.paths) {
-    if (path.kind !== "route" && path.kind !== "copper") continue
+    if (
+      (path.kind !== "route" && path.kind !== "copper") ||
+      path.polarity === "negative"
+    ) {
+      continue
+    }
     const layerName =
       path.gerberLayer ??
       getGerberCopperLayerName({
@@ -582,31 +664,20 @@ const renderCopperPaths = (context: RenderContext): string => {
         })
         .join("")
 
-      return `<g id="pads-${layerName}" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${context.artworkClipAttribute}>${pathElements}</g>`
+      return `<g id="pads-${layerName}" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${getCopperMaskAttribute(context, layerName)}${context.artworkClipAttribute}>${pathElements}</g>`
     })
     .join("")
 }
 
-const getViaDrillRadius = (
-  circle: PadsGeometryCircle,
-  minimumFeatureSize: number,
-): number => {
-  const outerRadius = Math.max(
-    Math.abs(circle.radius),
-    minimumFeatureSize * 1.8,
-  )
+const getViaDrillRadius = (circle: PadsGeometryCircle): number | undefined => {
   if (
     circle.drillRadius !== undefined &&
     Number.isFinite(circle.drillRadius) &&
     circle.drillRadius > 0
   ) {
-    return Math.min(Math.abs(circle.drillRadius), outerRadius * 0.999)
+    return Math.abs(circle.drillRadius)
   }
-  const annularWidth = Math.max(
-    Math.min(Math.abs(circle.width), outerRadius * 0.55),
-    minimumFeatureSize * 0.65,
-  )
-  return Math.max(outerRadius - annularWidth, outerRadius * 0.38)
+  return undefined
 }
 
 const getViaApertures = (
@@ -620,7 +691,8 @@ const getViaApertures = (
 
   for (const circle of geometry.circles) {
     if (circle.kind !== "via") continue
-    const drillRadius = getViaDrillRadius(circle, minimumFeatureSize)
+    const drillRadius = getViaDrillRadius(circle)
+    if (drillRadius === undefined) continue
     for (const pad of getViaCopperPads({ circle, geometry })) {
       const radius = Math.max(Math.abs(pad.radius), minimumFeatureSize * 1.8)
       const apertureKey = getViaApertureKey({
@@ -650,6 +722,65 @@ const renderApertureDefinitions = (apertures: ViaAperture[]): string =>
         : `<circle id="${aperture.id}" cx="0" cy="0" r="${formatNumber(aperture.radius)}"/>`,
     )
     .join("")
+
+const renderCopperPolarityMasks = (context: RenderContext): string => {
+  const negativePathsByLayer = new Map<string, PadsGeometryPath[]>()
+  const negativeCirclesByLayer = new Map<string, PadsGeometryCircle[]>()
+  for (const path of context.geometry.paths) {
+    if (path.kind !== "copper" || path.polarity !== "negative") continue
+    const layerName =
+      path.gerberLayer ??
+      getGerberCopperLayerName({
+        geometry: context.geometry,
+        layer: path.layer,
+      })
+    const paths = negativePathsByLayer.get(layerName) ?? []
+    paths.push(path)
+    negativePathsByLayer.set(layerName, paths)
+  }
+  for (const circle of context.geometry.circles) {
+    if (circle.kind !== "copper" || circle.polarity !== "negative") continue
+    const layerName =
+      circle.gerberLayer ??
+      getGerberCopperLayerName({
+        geometry: context.geometry,
+        layer: circle.layer,
+      })
+    const circles = negativeCirclesByLayer.get(layerName) ?? []
+    circles.push(circle)
+    negativeCirclesByLayer.set(layerName, circles)
+  }
+
+  const layerNames = new Set([
+    ...negativePathsByLayer.keys(),
+    ...negativeCirclesByLayer.keys(),
+  ])
+  const width = context.bounds.maximumX - context.bounds.minimumX
+  const height = context.bounds.maximumY - context.bounds.minimumY
+  return [...layerNames]
+    .map((layerName) => {
+      const pathElements = (negativePathsByLayer.get(layerName) ?? [])
+        .map((path) => {
+          const pathData = getPathData(path)
+          if (!pathData) return ""
+          const strokeWidth = getRenderedStrokeWidth({
+            sourceWidth: path.width,
+            minimumFeatureSize: context.minimumFeatureSize,
+            kind: path.kind,
+          })
+          return `<path ${getMetadataAttributes(path)} d="${pathData}" fill="${path.closed ? "black" : "none"}" stroke="black" stroke-width="${formatNumber(strokeWidth)}"/>`
+        })
+        .join("")
+      const circleElements = (negativeCirclesByLayer.get(layerName) ?? [])
+        .map(
+          (circle) =>
+            `<circle ${getMetadataAttributes(circle)} cx="${formatNumber(circle.center.x)}" cy="${formatNumber(circle.center.y)}" r="${formatNumber(Math.abs(circle.radius))}" fill="black" stroke="black" stroke-width="${formatNumber(Math.max(Math.abs(circle.width), context.minimumFeatureSize))}"/>`,
+        )
+        .join("")
+      return `<mask id="${getCopperMaskId(layerName)}" maskUnits="userSpaceOnUse" x="${formatNumber(context.bounds.minimumX)}" y="${formatNumber(context.bounds.minimumY)}" width="${formatNumber(width)}" height="${formatNumber(height)}"><rect x="${formatNumber(context.bounds.minimumX)}" y="${formatNumber(context.bounds.minimumY)}" width="${formatNumber(width)}" height="${formatNumber(height)}" fill="white"/>${pathElements}${circleElements}</mask>`
+    })
+    .join("")
+}
 
 const getViaCopperPads = ({
   circle,
@@ -744,7 +875,12 @@ const renderCopperCircles = ({
 }): string => {
   const flashesByLayer = new Map<string, CopperCircleFlash[]>()
   for (const circle of context.geometry.circles) {
-    if (circle.kind !== "via" && circle.kind !== "copper") continue
+    if (
+      (circle.kind !== "via" && circle.kind !== "copper") ||
+      circle.polarity === "negative"
+    ) {
+      continue
+    }
     if (circle.kind === "copper") {
       const layerName =
         circle.gerberLayer ??
@@ -760,7 +896,8 @@ const renderCopperCircles = ({
     }
 
     const renderedApertureIds = new Set<string>()
-    const drillRadius = getViaDrillRadius(circle, context.minimumFeatureSize)
+    const drillRadius = getViaDrillRadius(circle)
+    if (drillRadius === undefined) continue
     for (const viaPad of getViaCopperPads({
       circle,
       geometry: context.geometry,
@@ -816,13 +953,15 @@ const renderCopperCircles = ({
         })
         .join("")
 
-      return `<g id="pads-${layerName}-flashes" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${context.artworkClipAttribute}>${circleElements}</g>`
+      return `<g id="pads-${layerName}-flashes" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${getCopperMaskAttribute(context, layerName)}${context.artworkClipAttribute}>${circleElements}</g>`
     })
     .join("")
 }
 
 const getPadMetadataAttributes = (pad: PadsGeometryPad): string =>
   [
+    pad.id ? `id="${escapeXml(getSvgEntityId(pad.id))}"` : "",
+    pad.source ? `data-source-id="${escapeXml(pad.source.sourceId)}"` : "",
     'data-kind="component-pad"',
     `data-pads-layer="${formatNumber(pad.layer)}"`,
     `data-reference="${escapeXml(pad.reference)}"`,
@@ -901,7 +1040,7 @@ const renderFootprintPads = (context: RenderContext): string => {
           return `<rect ${attributes}${(pad.cornerRadius ?? 0) > 0 ? ` data-corner-radius="${formatNumber(pad.cornerRadius ?? 0)}"` : ""} x="${formatNumber(-pad.width / 2)}" y="${formatNumber(-pad.height / 2)}" width="${formatNumber(pad.width)}" height="${formatNumber(pad.height)}"${cornerRadius > 0 ? ` rx="${formatNumber(cornerRadius)}" ry="${formatNumber(cornerRadius)}"` : ""} transform="translate(${formatNumber(pad.center.x)} ${formatNumber(pad.center.y)}) rotate(${formatNumber(pad.rotation)})"/>`
         })
         .join("")
-      return `<g id="pads-${layerName}-component-pads" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="none"${context.artworkClipAttribute}>${padElements}</g>`
+      return `<g id="pads-${layerName}-component-pads" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="none"${getCopperMaskAttribute(context, layerName)}${context.artworkClipAttribute}>${padElements}</g>`
     })
     .join("")
 }
@@ -964,12 +1103,21 @@ const renderDrills = ({ context }: { context: RenderContext }): string => {
       }).some((pad) => visibleCopperLayers.has(pad.layer))
     })
     .map((circle) => {
-      const drillRadius = getViaDrillRadius(circle, context.minimumFeatureSize)
+      const drillRadius = getViaDrillRadius(circle)
+      if (drillRadius === undefined) return ""
       const layerSpanAttributes =
         circle.startLayer !== undefined && circle.endLayer !== undefined
           ? ` data-start-layer="${formatNumber(circle.startLayer)}" data-end-layer="${formatNumber(circle.endLayer)}"`
           : ""
-      return `<circle data-kind="drill"${layerSpanAttributes} cx="${formatNumber(circle.center.x)}" cy="${formatNumber(circle.center.y)}" r="${formatNumber(drillRadius)}"/>`
+      const identityAttributes = [
+        circle.id
+          ? ` id="${escapeXml(getSvgEntityId(`${circle.id}:drill`))}"`
+          : "",
+        circle.source
+          ? ` data-source-id="${escapeXml(circle.source.sourceId)}"`
+          : "",
+      ].join("")
+      return `<circle${identityAttributes} data-kind="drill"${layerSpanAttributes} cx="${formatNumber(circle.center.x)}" cy="${formatNumber(circle.center.y)}" r="${formatNumber(drillRadius)}"/>`
     })
     .join("")
 
@@ -992,7 +1140,7 @@ const renderDrills = ({ context }: { context: RenderContext }): string => {
     )
     .map((hole) => {
       const layerSpanAttributes = ` data-start-layer="${formatNumber(hole.startLayer)}" data-end-layer="${formatNumber(hole.endLayer)}"`
-      const metadataAttributes = ` data-reference="${escapeXml(hole.reference)}" data-pin="${escapeXml(hole.pinNumber)}" data-decal="${escapeXml(hole.decalName)}" data-plated="${hole.plated ? "true" : "false"}"`
+      const metadataAttributes = `${hole.id ? ` id="${escapeXml(getSvgEntityId(hole.id))}"` : ""}${hole.source ? ` data-source-id="${escapeXml(hole.source.sourceId)}"` : ""} data-reference="${escapeXml(hole.reference)}" data-pin="${escapeXml(hole.pinNumber)}" data-decal="${escapeXml(hole.decalName)}" data-plated="${hole.plated ? "true" : "false"}"`
       if (Math.abs(hole.width - hole.height) < 1e-6) {
         return `<circle data-kind="component-drill"${layerSpanAttributes}${metadataAttributes} cx="${formatNumber(hole.center.x)}" cy="${formatNumber(hole.center.y)}" r="${formatNumber(hole.width / 2)}"/>`
       }
@@ -1112,7 +1260,7 @@ const renderPlacements = (context: RenderContext): string => {
 
   for (const placement of context.geometry.placements.slice(0, 1500)) {
     if (!isFinitePoint(placement.location)) continue
-    const element = `<g data-kind="placement" data-reference="${escapeXml(placement.reference)}" transform="translate(${formatNumber(placement.location.x)} ${formatNumber(placement.location.y)}) rotate(${formatNumber(placement.rotation)})"><path d="M ${formatNumber(-markerRadius)} 0 L ${formatNumber(markerRadius)} 0 M 0 ${formatNumber(-markerRadius)} L 0 ${formatNumber(markerRadius)}" fill="none" stroke="currentColor" stroke-width="${formatNumber(context.minimumFeatureSize)}"/><text x="${formatNumber(markerRadius * 1.4)}" y="${formatNumber(-markerRadius)}" transform="scale(1,-1)" fill="currentColor" stroke="none" font-family="monospace" font-size="${formatNumber(fontSize)}">${escapeXml(placement.reference)}</text></g>`
+    const element = `<g${placement.id ? ` id="${escapeXml(getSvgEntityId(placement.id))}"` : ""}${placement.source ? ` data-source-id="${escapeXml(placement.source.sourceId)}"` : ""} data-kind="placement" data-reference="${escapeXml(placement.reference)}" transform="translate(${formatNumber(placement.location.x)} ${formatNumber(placement.location.y)}) rotate(${formatNumber(placement.rotation)})"><path d="M ${formatNumber(-markerRadius)} 0 L ${formatNumber(markerRadius)} 0 M 0 ${formatNumber(-markerRadius)} L 0 ${formatNumber(markerRadius)}" fill="none" stroke="currentColor" stroke-width="${formatNumber(context.minimumFeatureSize)}"/><text x="${formatNumber(markerRadius * 1.4)}" y="${formatNumber(-markerRadius)}" transform="scale(1,-1)" fill="currentColor" stroke="none" font-family="monospace" font-size="${formatNumber(fontSize)}">${escapeXml(placement.reference)}</text></g>`
     ;(placement.bottomLayer ? bottomPlacements : topPlacements).push(element)
   }
 
@@ -1160,7 +1308,7 @@ const renderTexts = (context: RenderContext): string => {
         context.minimumFeatureSize * 0.5,
       )
       const mirrorScale = text.mirrored ? -1 : 1
-      return `<text data-kind="board-text" data-pads-layer="${escapeXml(String(text.layer ?? ""))}" x="0" y="0" transform="translate(${formatNumber(text.location.x)} ${formatNumber(text.location.y)}) rotate(${formatNumber(text.rotation)}) scale(${mirrorScale},-1)" fill="currentColor" stroke="currentColor" stroke-width="${formatNumber(strokeWidth * 0.15)}" font-family="monospace" font-size="${formatNumber(fontSize)}">${escapeXml(text.content)}</text>`
+      return `<text${text.id ? ` id="${escapeXml(getSvgEntityId(text.id))}"` : ""}${text.source ? ` data-source-id="${escapeXml(text.source.sourceId)}"` : ""} data-kind="board-text" data-pads-layer="${escapeXml(String(text.layer ?? ""))}" x="0" y="0" transform="translate(${formatNumber(text.location.x)} ${formatNumber(text.location.y)}) rotate(${formatNumber(text.rotation)}) scale(${mirrorScale},-1)" fill="currentColor" stroke="currentColor" stroke-width="${formatNumber(strokeWidth * 0.15)}" font-family="monospace" font-size="${formatNumber(fontSize)}">${escapeXml(text.content)}</text>`
     })
     .join("")
 
@@ -1209,7 +1357,7 @@ const renderUnassignedVertices = (context: RenderContext): string => {
       continue
     }
     elements.push(
-      `<circle data-kind="unassigned-vertex" cx="${formatNumber(point.x)}" cy="${formatNumber(point.y)}" r="${formatNumber(pointRadius)}"/>`,
+      `<circle${point.id ? ` id="${escapeXml(getSvgEntityId(point.id))}"` : ""}${point.source ? ` data-source-id="${escapeXml(point.source.sourceId)}"` : ""} data-kind="unassigned-vertex" cx="${formatNumber(point.x)}" cy="${formatNumber(point.y)}" r="${formatNumber(pointRadius)}"/>`,
     )
   }
 
@@ -1233,7 +1381,7 @@ const renderUnverifiedConnections = (context: RenderContext): string => {
     .map((path) => {
       const pathData = getPathData(path)
       return pathData
-        ? `<path data-kind="unverified-connection" d="${pathData}" fill="none" stroke="currentColor" stroke-width="${formatNumber(strokeWidth)}" stroke-dasharray="${formatNumber(strokeWidth * 5)} ${formatNumber(strokeWidth * 4)}"/>`
+        ? `<path ${getMetadataAttributes(path)} data-debug-kind="unverified-connection" d="${pathData}" fill="none" stroke="currentColor" stroke-width="${formatNumber(strokeWidth)}" stroke-dasharray="${formatNumber(strokeWidth * 5)} ${formatNumber(strokeWidth * 4)}"/>`
         : ""
     })
     .join("")
@@ -1243,7 +1391,7 @@ const renderUnverifiedConnections = (context: RenderContext): string => {
     .filter((point) => pointInsideBounds({ point, bounds: context.bounds }))
     .map(
       (point) =>
-        `<circle data-kind="unverified-via-location" cx="${formatNumber(point.x)}" cy="${formatNumber(point.y)}" r="${formatNumber(pointRadius)}" fill="none" stroke="currentColor" stroke-width="${formatNumber(pointStrokeWidth)}"/>`,
+        `<circle${point.id ? ` id="${escapeXml(getSvgEntityId(point.id))}"` : ""}${point.source ? ` data-source-id="${escapeXml(point.source.sourceId)}"` : ""} data-kind="unverified-via-location" cx="${formatNumber(point.x)}" cy="${formatNumber(point.y)}" r="${formatNumber(pointRadius)}" fill="none" stroke="currentColor" stroke-width="${formatNumber(pointStrokeWidth)}"/>`,
     )
     .join("")
   if (!connectionElements && !viaElements) return ""
@@ -1292,8 +1440,16 @@ export const generateSvgFromPadsGeometry = (
   geometry: PadsBoardGeometry,
   options: GeneratePadsSvgOptions = {},
 ): string => {
-  const bounds = options.viewBox
-    ? getRequestedBounds(options.viewBox)
+  const boardViewBoxUnits = options.viewBoxUnits ?? "normalized"
+  const normalizedBoardViewBox = options.viewBox
+    ? normalizeRequestedViewBox({
+        geometry,
+        viewBox: options.viewBox,
+        viewBoxUnits: boardViewBoxUnits,
+      })
+    : undefined
+  const bounds = normalizedBoardViewBox
+    ? getRequestedBounds(normalizedBoardViewBox)
     : getBounds(geometry)
   const boundsWidth = Math.max(bounds.maximumX - bounds.minimumX, 1)
   const boundsHeight = Math.max(bounds.maximumY - bounds.minimumY, 1)
@@ -1347,10 +1503,16 @@ export const generateSvgFromPadsGeometry = (
   const metadata = {
     sourceFormat: geometry.sourceFormat,
     version: geometry.version,
+    sourceUnits: geometry.sourceUnits,
+    coordinateUnit: geometry.coordinateUnit,
     layerCount: geometry.layerCount,
     diagnostics: geometry.diagnostics,
+    issues: geometry.issues,
+    coverage: geometry.coverage,
     visibleGerberLayers: options.visibleGerberLayers,
     boardViewBox: options.viewBox,
+    boardViewBoxUnits: options.viewBox ? boardViewBoxUnits : undefined,
+    normalizedBoardViewBox,
     clipArtworkToBoardOutline: options.clipArtworkToBoardOutline,
     counts: {
       paths: geometry.paths.length,
@@ -1378,6 +1540,7 @@ export const generateSvgFromPadsGeometry = (
     outlineClipPaths
       ? `<clipPath id="pads-board-outline">${outlineClipPaths}</clipPath>`
       : "",
+    renderCopperPolarityMasks(context),
     renderApertureDefinitions(apertures),
     "</defs>",
     `<rect data-kind="negative-space" x="${formatNumber(bounds.minimumX)}" y="${formatNumber(-bounds.maximumY)}" width="${formatNumber(boundsWidth)}" height="${formatNumber(boundsHeight)}" fill="${escapeXml(backgroundColor)}"/>`,

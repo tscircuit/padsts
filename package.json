@@ -6,6 +6,9 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "padsts": "dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,21 +20,30 @@
     "LICENSE",
     "README.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "bun": ">=1.3.2"
+  },
   "sideEffects": false,
   "repository": {
     "type": "git",
     "url": "https://github.com/tscircuit/padsts"
   },
   "scripts": {
-    "build": "tsup-node lib/index.ts --format esm --dts",
+    "build": "tsup-node lib/index.ts lib/cli.ts --format esm --dts --clean",
     "test": "bun test",
     "test:assets": "bun test tests/downloaded-assets.test.ts",
     "test:download-assets": "bun run scripts/download-test-assets.ts",
     "test:svg": "bun test tests/svg",
+    "test:package": "bun test tests/package.test.ts",
+    "package:check": "npm pack --dry-run --cache ./node_modules/.cache/npm",
     "typecheck": "bunx tsc --noEmit",
     "format": "biome check --write .",
     "format:check": "biome check .",
-    "check": "bun run format:check && bun run typecheck && bun test && bun run build"
+    "check": "bun run format:check && bun run typecheck && bun run build && bun test && bun run package:check"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.4",

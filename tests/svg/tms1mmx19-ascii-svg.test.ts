@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { convertPadsCoordinateToNanometers } from "../../lib"
 import {
   expectBoardZoomSnapshotViews,
   expectGerberStyleSvg,
@@ -11,6 +12,8 @@ import {
 
 const asset = getSvgTestAsset("kicad-tms1mmx19-ascii")
 const isAvailable = await isSvgTestAssetAvailable(asset)
+const basic = (coordinate: number): number =>
+  convertPadsCoordinateToNanometers(coordinate, "BASIC")
 
 test.skipIf(!isAvailable)(
   "renders the unrouted TMS ASCII reference board",
@@ -51,14 +54,14 @@ test.skipIf(!isAvailable)(
       polarity: "positive",
     })
     expect(u18Pin1Copper?.points[0]).toEqual({
-      x: 384_067_500,
-      y: 114_685_500,
+      x: basic(384_067_500),
+      y: basic(114_685_500),
     })
     expect(
       u18Pin1Copper?.segments?.find((segment) => segment.kind === "arc"),
     ).toMatchObject({
-      center: { x: 385_192_500, y: 114_460_500 },
-      radius: 225_000,
+      center: { x: basic(385_192_500), y: basic(114_460_500) },
+      radius: basic(225_000),
       deltaAngle: -180,
     })
     expect(geometry.diagnostics).toEqual([

@@ -1,12 +1,20 @@
+import type { PadsDiagnostic } from "../diagnostics"
 import { PadsParseError } from "../parse-error"
 import { PadsAsciiDocument, type PadsAsciiUnits } from "./pads-ascii-document"
-import { createPadsAsciiSection } from "./pads-ascii-section"
+import { createPadsAsciiRecord } from "./pads-ascii-record"
+import {
+  createPadsAsciiSection,
+  isKnownPadsAsciiSectionName,
+} from "./pads-ascii-section"
 
 interface LineSpan {
   startOffset: number
   endOffset: number
+  line: number
   sectionName?: string
 }
+
+const NESTED_HEADER_NAMES = new Set(["REMARK", "SIGNAL"])
 
 const getSectionName = (lineText: string): string | undefined => {
   const contentText = lineText.replace(/(?:\r\n|\r|\n)$/u, "").trim()
@@ -20,6 +28,7 @@ const getSectionName = (lineText: string): string | undefined => {
 const readLineSpans = (sourceText: string): LineSpan[] => {
   const lineSpans: LineSpan[] = []
   let startOffset = 0
+  let line = 1
 
   while (startOffset < sourceText.length) {
     let endOffset = startOffset
@@ -44,9 +53,11 @@ const readLineSpans = (sourceText: string): LineSpan[] => {
     lineSpans.push({
       startOffset,
       endOffset,
+      line,
       sectionName: getSectionName(lineText),
     })
     startOffset = endOffset
+    line++
   }
 
   return lineSpans
@@ -55,7 +66,9 @@ const readLineSpans = (sourceText: string): LineSpan[] => {
 const parseVersionHeader = (
   sectionName: string,
 ): { version: string; units: PadsAsciiUnits } | undefined => {
-  const match = /^PADS-POWERPCB-(.+)-(BASIC|MILS|METRIC)$/u.exec(sectionName)
+  const match = /^PADS-POWERPCB-(.+)-(BASIC|MILS|INCHES|METRIC)$/u.exec(
+    sectionName,
+  )
   if (!match) return undefined
 
   return {
@@ -77,7 +90,12 @@ export const parsePadsAscii = (sourceText: string): PadsAsciiDocument => {
   const sectionLineSpans: LineSpan[] = []
 
   for (const lineSpan of lineSpans) {
-    if (lineSpan.sectionName) sectionLineSpans.push(lineSpan)
+    if (
+      lineSpan.sectionName &&
+      !NESTED_HEADER_NAMES.has(lineSpan.sectionName)
+    ) {
+      sectionLineSpans.push(lineSpan)
+    }
   }
 
   const firstSection = sectionLineSpans[0]
@@ -97,19 +115,82 @@ export const parsePadsAscii = (sourceText: string): PadsAsciiDocument => {
   }
 
   const sections = []
+  const sectionNameCounts = new Map<string, number>()
   for (let index = 0; index < sectionLineSpans.length; index++) {
     const lineSpan = sectionLineSpans[index]
     if (!lineSpan?.sectionName) continue
 
     const nextLineSpan = sectionLineSpans[index + 1]
     const sectionEndOffset = nextLineSpan?.startOffset ?? sourceText.length
+    const bodyLineSpans = lineSpans.filter(
+      (candidateLineSpan) =>
+        candidateLineSpan.startOffset >= lineSpan.endOffset &&
+        candidateLineSpan.startOffset < sectionEndOffset,
+    )
+    const occurrence = (sectionNameCounts.get(lineSpan.sectionName) ?? 0) + 1
+    sectionNameCounts.set(lineSpan.sectionName, occurrence)
     sections.push(
       createPadsAsciiSection({
         name: lineSpan.sectionName,
         headerText: sourceText.slice(lineSpan.startOffset, lineSpan.endOffset),
         bodyText: sourceText.slice(lineSpan.endOffset, sectionEndOffset),
+        records: bodyLineSpans.map((bodyLineSpan) =>
+          createPadsAsciiRecord({
+            rawText: sourceText.slice(
+              bodyLineSpan.startOffset,
+              bodyLineSpan.endOffset,
+            ),
+            section: lineSpan.sectionName ?? "unknown",
+            span: {
+              startOffset: bodyLineSpan.startOffset,
+              endOffset: bodyLineSpan.endOffset,
+            },
+            line: bodyLineSpan.line,
+          }),
+        ),
+        provenance: {
+          format: "ascii",
+          sourceId: `ascii:${lineSpan.sectionName}:${occurrence}`,
+          section: lineSpan.sectionName,
+          span: {
+            startOffset: lineSpan.startOffset,
+            endOffset: sectionEndOffset,
+            startLine: lineSpan.line,
+            endLine: bodyLineSpans.at(-1)?.line ?? lineSpan.line,
+          },
+        },
       }),
     )
+  }
+
+  const diagnostics: PadsDiagnostic[] = []
+  const endSectionIndices = sections.flatMap((section, index) =>
+    section.name === "END" ? [index] : [],
+  )
+  if (endSectionIndices.length === 0) {
+    diagnostics.push({
+      code: "ascii-missing-end",
+      severity: "warning",
+      category: "validation",
+      message: "PADS ASCII document does not contain an *END* terminator",
+    })
+  } else if (
+    endSectionIndices.length !== 1 ||
+    endSectionIndices[0] !== sections.length - 1
+  ) {
+    diagnostics.push({
+      code: "ascii-invalid-end-order",
+      severity: "warning",
+      category: "validation",
+      message: "PADS ASCII *END* terminator is duplicated or is not last",
+    })
+  }
+
+  const recordsByKind: Record<string, number> = {}
+  for (const section of sections) {
+    for (const record of section.records) {
+      recordsByKind[record.kind] = (recordsByKind[record.kind] ?? 0) + 1
+    }
   }
 
   return new PadsAsciiDocument({
@@ -117,5 +198,20 @@ export const parsePadsAscii = (sourceText: string): PadsAsciiDocument => {
     sections,
     version: versionHeader.version,
     units: versionHeader.units,
+    diagnostics,
+    coverage: {
+      sectionCount: sections.length,
+      knownSectionCount: sections.filter((section) =>
+        isKnownPadsAsciiSectionName(section.name),
+      ).length,
+      unknownSectionCount: sections.filter(
+        (section) => !isKnownPadsAsciiSectionName(section.name),
+      ).length,
+      recordCount: sections.reduce(
+        (count, section) => count + section.records.length,
+        0,
+      ),
+      recordsByKind,
+    },
   })
 }

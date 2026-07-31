@@ -1,5 +1,6 @@
 import { expect } from "bun:test"
 import {
+  convertPadsCoordinateToNanometers,
   extractPadsBoardGeometry,
   type GeneratePadsSvgOptions,
   generateSvgFromPads,
@@ -128,6 +129,7 @@ export const expectVisualSnapshotViews = async ({
 
 export interface BoardZoomSnapshotView {
   name: string
+  /** Zoom window in the downloaded file's declared source units. */
   viewBox: PadsSvgBoardViewBox
   visibleGerberLayers?: string[]
   clipArtworkToBoardOutline?: boolean
@@ -142,10 +144,24 @@ export const expectBoardZoomSnapshotViews = async ({
   testFilePath: string
   views: BoardZoomSnapshotView[]
 }): Promise<void> => {
+  const sourceBytes = await Bun.file(getDownloadedTestAssetPath(asset)).bytes()
+  const document = parsePads(sourceBytes)
+  const sourceUnits = document.kind === "ascii" ? document.units : "BASIC"
+  if (sourceUnits === "unknown") {
+    throw new RangeError(`Cannot normalize zoom units for ${asset.id}`)
+  }
+  const normalizeCoordinate = (coordinate: number): number =>
+    convertPadsCoordinateToNanometers(coordinate, sourceUnits)
+
   for (const view of views) {
     const svg = await renderDownloadedPadsAsset(asset, {
       width: 1000,
-      viewBox: view.viewBox,
+      viewBox: {
+        x: normalizeCoordinate(view.viewBox.x),
+        y: normalizeCoordinate(view.viewBox.y),
+        width: normalizeCoordinate(view.viewBox.width),
+        height: normalizeCoordinate(view.viewBox.height),
+      },
       visibleGerberLayers: view.visibleGerberLayers ?? COPPER_VIEW_LAYERS,
       clipArtworkToBoardOutline: view.clipArtworkToBoardOutline,
       showPlacements: false,
