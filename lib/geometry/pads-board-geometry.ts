@@ -5,6 +5,26 @@ export interface PadsGeometryPoint {
   y: number
 }
 
+export interface PadsGeometryLineSegment {
+  kind: "line"
+  start: PadsGeometryPoint
+  end: PadsGeometryPoint
+}
+
+export interface PadsGeometryArcSegment {
+  kind: "arc"
+  start: PadsGeometryPoint
+  end: PadsGeometryPoint
+  center: PadsGeometryPoint
+  radius: number
+  startAngle: number
+  deltaAngle: number
+}
+
+export type PadsGeometryPathSegment =
+  | PadsGeometryLineSegment
+  | PadsGeometryArcSegment
+
 export type PadsGeometryPathKind =
   | "outline"
   | "route"
@@ -15,6 +35,7 @@ export type PadsGeometryPathKind =
 export interface PadsGeometryPath {
   kind: PadsGeometryPathKind
   points: PadsGeometryPoint[]
+  segments?: PadsGeometryPathSegment[]
   closed: boolean
   width: number
   layer?: number | string
@@ -74,6 +95,8 @@ export interface PadsBoardGeometry {
   texts: PadsGeometryText[]
   placements: PadsGeometryPlacement[]
   unassignedVertices: PadsGeometryPoint[]
+  unverifiedConnections: PadsGeometryPath[]
+  unverifiedViaLocations: PadsGeometryPoint[]
   binarySections: PadsBinarySectionSummary[]
   diagnostics: string[]
 }

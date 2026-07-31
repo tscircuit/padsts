@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   detectPadsFormat,
+  extractPadsBoardGeometry,
   PadsAsciiUnknownSection,
   parsePads,
   parsePadsAscii,
@@ -60,5 +61,59 @@ describe("PADS ASCII", () => {
       "END",
     ])
     expect(document.getString()).toBe(sourceText)
+  })
+
+  test("omits layer-0 ratlines and thermal flags from fabrication geometry", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-BASIC! DESIGN DATABASE ASCII FILE 1.0",
+      "*ROUTE*",
+      "*SIGNAL* UNROUTED",
+      "U1.1 U2.1",
+      "0 0 0 10 1792 THERMAL",
+      "100 100 65 10 1792 THERMAL",
+      "",
+      "*SIGNAL* ROUTED",
+      "U1.2 U2.2",
+      "0 0 1 10 0",
+      "100 0 65 10 0",
+      "*END*",
+      "",
+    ].join("\n")
+    const geometry = extractPadsBoardGeometry(parsePadsAscii(sourceText))
+
+    expect(geometry.paths).toHaveLength(1)
+    expect(geometry.paths[0]).toMatchObject({
+      kind: "route",
+      layer: 1,
+      points: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+    })
+    expect(geometry.circles).toEqual([])
+    expect(geometry.diagnostics).toContain(
+      "1 unrouted ASCII connections omitted from fabrication geometry",
+    )
+  })
+
+  test("accepts numeric footprint names in part placements", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-BASIC! DESIGN DATABASE ASCII FILE 1.0",
+      "*PART*",
+      "C6 0402 1250 -2500 90.000 U N 0 -1 0 -1 2",
+      "*END*",
+      "",
+    ].join("\n")
+    const geometry = extractPadsBoardGeometry(parsePadsAscii(sourceText))
+
+    expect(geometry.placements).toEqual([
+      {
+        reference: "C6",
+        footprintName: "0402",
+        location: { x: 1250, y: -2500 },
+        rotation: 90,
+        bottomLayer: false,
+      },
+    ])
   })
 })

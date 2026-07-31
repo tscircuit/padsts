@@ -7,16 +7,20 @@ import {
   renderDownloadedPadsAsset,
 } from "./render-downloaded-pads-asset"
 
-const asset = getSvgTestAsset("kicad-synthetic-multilayer-ascii")
+const asset = getSvgTestAsset("kicad-tms1mmx19-ascii")
 const isAvailable = await isSvgTestAssetAvailable(asset)
 
 test.skipIf(!isAvailable)(
-  "renders the synthetic multilayer ASCII board",
+  "renders the unrouted TMS ASCII reference board",
   async () => {
     const svg = await renderDownloadedPadsAsset(asset)
     expectGerberStyleSvg(svg)
     expect(svg).toContain('data-kind="outline"')
-    expect(svg).toContain('data-gerber-layer="Edge_Cuts"')
+    expect(svg).toContain('data-kind="placement"')
+    expect(svg).not.toContain('data-kind="route"')
+    expect(svg).toContain(
+      "1202 unrouted ASCII connections omitted from fabrication geometry",
+    )
     await expect(svg).toMatchSvgSnapshot(import.meta.path)
     await expectVisualSnapshotViews({
       asset,

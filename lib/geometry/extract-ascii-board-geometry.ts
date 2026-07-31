@@ -6,6 +6,7 @@ import type {
   PadsGeometryLayerInfo,
   PadsGeometryPath,
   PadsGeometryPathKind,
+  PadsGeometryPathSegment,
   PadsGeometryPlacement,
   PadsGeometryPoint,
   PadsGeometryText,
@@ -41,6 +42,96 @@ const parseFiniteNumber = (token: string | undefined): number | undefined => {
   if (token === undefined) return undefined
   const parsedNumber = Number(token)
   return Number.isFinite(parsedNumber) ? parsedNumber : undefined
+}
+
+const pointsAreEqual = (
+  firstPoint: PadsGeometryPoint,
+  secondPoint: PadsGeometryPoint,
+): boolean =>
+  Math.abs(firstPoint.x - secondPoint.x) < 1e-6 &&
+  Math.abs(firstPoint.y - secondPoint.y) < 1e-6
+
+const addLineSegment = ({
+  segments,
+  start,
+  end,
+}: {
+  segments: PadsGeometryPathSegment[]
+  start: PadsGeometryPoint | undefined
+  end: PadsGeometryPoint
+}): void => {
+  if (!start || pointsAreEqual(start, end)) return
+  segments.push({ kind: "line", start, end })
+}
+
+const parseArcVertex = ({
+  pointTokens,
+  originX,
+  originY,
+}: {
+  pointTokens: string[]
+  originX: number
+  originY: number
+}): Extract<PadsGeometryPathSegment, { kind: "arc" }> | undefined => {
+  if (pointTokens.length < 8) return undefined
+
+  const startAngleTenths = parseFiniteNumber(pointTokens[2])
+  const deltaAngleTenths = parseFiniteNumber(pointTokens[3])
+  const boundingMinimumX = parseFiniteNumber(pointTokens[4])
+  const boundingMinimumY = parseFiniteNumber(pointTokens[5])
+  const boundingMaximumX = parseFiniteNumber(pointTokens[6])
+  const boundingMaximumY = parseFiniteNumber(pointTokens[7])
+  if (
+    startAngleTenths === undefined ||
+    deltaAngleTenths === undefined ||
+    boundingMinimumX === undefined ||
+    boundingMinimumY === undefined ||
+    boundingMaximumX === undefined ||
+    boundingMaximumY === undefined
+  ) {
+    return undefined
+  }
+
+  const center = {
+    x: originX + (boundingMinimumX + boundingMaximumX) / 2,
+    y: originY + (boundingMinimumY + boundingMaximumY) / 2,
+  }
+  const radiusX = Math.abs(boundingMaximumX - boundingMinimumX) / 2
+  const radiusY = Math.abs(boundingMaximumY - boundingMinimumY) / 2
+  const radiusTolerance = Math.max(1, radiusX * 1e-6)
+  if (Math.abs(radiusX - radiusY) > radiusTolerance) return undefined
+
+  const radius = radiusX
+  const startAngle = startAngleTenths / 10
+  const deltaAngle = deltaAngleTenths / 10
+  if (
+    !Number.isFinite(radius) ||
+    radius <= 0 ||
+    !Number.isFinite(startAngle) ||
+    !Number.isFinite(deltaAngle) ||
+    deltaAngle === 0 ||
+    Math.abs(deltaAngle) > 360
+  ) {
+    return undefined
+  }
+
+  const startAngleRadians = (startAngle * Math.PI) / 180
+  const endAngleRadians = ((startAngle + deltaAngle) * Math.PI) / 180
+  return {
+    kind: "arc",
+    start: {
+      x: center.x + radius * Math.cos(startAngleRadians),
+      y: center.y + radius * Math.sin(startAngleRadians),
+    },
+    end: {
+      x: center.x + radius * Math.cos(endAngleRadians),
+      y: center.y + radius * Math.sin(endAngleRadians),
+    },
+    center,
+    radius,
+    startAngle,
+    deltaAngle,
+  }
 }
 
 const getHeaderToken = (lineText: string): string | undefined =>
@@ -102,7 +193,7 @@ const addLineSectionGeometry = ({
   diagnostics: string[]
 }): void => {
   let lineIndex = 0
-  let approximatedArcCount = 0
+  let malformedArcCount = 0
 
   while (lineIndex < section.lines.length) {
     const objectTokens = tokenizeLine(section.lines[lineIndex] ?? "")
@@ -140,21 +231,54 @@ const addLineSectionGeometry = ({
       const width = Math.abs(parseFiniteNumber(pieceTokens[2]) ?? 0)
       const layer = parseFiniteNumber(pieceTokens[3])
       const points: PadsGeometryPoint[] = []
+      const segments: PadsGeometryPathSegment[] = []
+      let currentPoint: PadsGeometryPoint | undefined
       lineIndex++
 
-      while (lineIndex < section.lines.length && points.length < cornerCount) {
+      let parsedCornerCount = 0
+      while (
+        lineIndex < section.lines.length &&
+        parsedCornerCount < cornerCount
+      ) {
         const pointTokens = tokenizeLine(section.lines[lineIndex] ?? "")
         const relativeX = parseFiniteNumber(pointTokens[0])
         const relativeY = parseFiniteNumber(pointTokens[1])
         lineIndex++
 
         if (relativeX === undefined || relativeY === undefined) continue
-        if (pointTokens.length > 2) approximatedArcCount++
+        parsedCornerCount++
 
-        points.push({
+        const arcSegment = parseArcVertex({
+          pointTokens,
+          originX,
+          originY,
+        })
+        if (arcSegment) {
+          addLineSegment({
+            segments,
+            start: currentPoint,
+            end: arcSegment.start,
+          })
+          if (
+            points.length === 0 ||
+            !pointsAreEqual(points.at(-1) ?? arcSegment.start, arcSegment.start)
+          ) {
+            points.push(arcSegment.start)
+          }
+          points.push(arcSegment.end)
+          segments.push(arcSegment)
+          currentPoint = arcSegment.end
+          continue
+        }
+        if (pointTokens.length >= 8) malformedArcCount++
+
+        const point = {
           x: originX + relativeX,
           y: originY + relativeY,
-        })
+        }
+        addLineSegment({ segments, start: currentPoint, end: point })
+        points.push(point)
+        currentPoint = point
       }
 
       if (
@@ -184,10 +308,22 @@ const addLineSectionGeometry = ({
       }
 
       if (points.length >= 2) {
+        const closed = pieceKind === "CLOSED" || pieceKind.endsWith("CLS")
+        if (closed) {
+          const firstPoint = points[0]
+          if (firstPoint) {
+            addLineSegment({
+              segments,
+              start: currentPoint,
+              end: firstPoint,
+            })
+          }
+        }
         paths.push({
           kind: pathKind,
           points,
-          closed: pieceKind === "CLOSED" || pieceKind.endsWith("CLS"),
+          segments,
+          closed,
           width,
           layer,
           name: objectName,
@@ -196,9 +332,9 @@ const addLineSectionGeometry = ({
     }
   }
 
-  if (approximatedArcCount > 0) {
+  if (malformedArcCount > 0) {
     diagnostics.push(
-      `${approximatedArcCount} ASCII line vertices include arc metadata rendered as straight segments`,
+      `${malformedArcCount} ASCII line arc records could not be decoded`,
     )
   }
 }
@@ -207,12 +343,15 @@ const addRouteSectionGeometry = ({
   section,
   paths,
   circles,
+  diagnostics,
 }: {
   section: AsciiSectionLines
   paths: PadsGeometryPath[]
   circles: PadsGeometryCircle[]
+  diagnostics: string[]
 }): void => {
   let netName = ""
+  let skippedUnroutedSegmentCount = 0
   let previousPoint:
     | (PadsGeometryPoint & { layer?: number; width: number })
     | undefined
@@ -261,21 +400,24 @@ const addRouteSectionGeometry = ({
       rawLayer === 65 ? (previousPoint?.layer ?? rawLayer) : rawLayer
     const currentPoint = { x, y, layer, width }
     if (previousPoint) {
-      paths.push({
-        kind: "route",
-        points: [previousPoint, currentPoint],
-        closed: false,
-        width: width || previousPoint.width,
-        layer,
-        netName,
-      })
+      if ((previousPoint.layer ?? 0) > 0 && layer > 0 && rawLayer !== 0) {
+        paths.push({
+          kind: "route",
+          points: [previousPoint, currentPoint],
+          closed: false,
+          width: width || previousPoint.width,
+          layer,
+          netName,
+        })
+      } else {
+        skippedUnroutedSegmentCount++
+      }
     }
 
-    const routeFlags = Math.trunc(parseFiniteNumber(lineTokens[4]) ?? 0)
     const hasViaName = lineTokens
       .slice(5)
       .some((token) => token.toUpperCase().includes("VIA"))
-    if (hasViaName || (routeFlags & 0x100) !== 0) {
+    if (hasViaName) {
       circles.push({
         kind: "via",
         center: { x, y },
@@ -287,6 +429,12 @@ const addRouteSectionGeometry = ({
     }
 
     previousPoint = currentPoint
+  }
+
+  if (skippedUnroutedSegmentCount > 0) {
+    diagnostics.push(
+      `${skippedUnroutedSegmentCount} unrouted ASCII connections omitted from fabrication geometry`,
+    )
   }
 }
 
@@ -343,7 +491,8 @@ const addPartSectionGeometry = (
       !lineTokens[0] ||
       !lineTokens[1] ||
       parseFiniteNumber(lineTokens[0]) !== undefined ||
-      parseFiniteNumber(lineTokens[1]) !== undefined ||
+      !["G", "U"].includes(lineTokens[5] ?? "") ||
+      !["M", "N"].includes(lineTokens[6] ?? "") ||
       x === undefined ||
       y === undefined ||
       rotation === undefined
@@ -409,7 +558,7 @@ export const extractAsciiBoardGeometry = (
     if (section.name === "LINES") {
       addLineSectionGeometry({ section, paths, circles, diagnostics })
     } else if (section.name === "ROUTE") {
-      addRouteSectionGeometry({ section, paths, circles })
+      addRouteSectionGeometry({ section, paths, circles, diagnostics })
     } else if (section.name === "TEXT") {
       addTextSectionGeometry(section, texts)
     } else if (section.name === "PART") {
@@ -428,6 +577,8 @@ export const extractAsciiBoardGeometry = (
     texts,
     placements,
     unassignedVertices: [],
+    unverifiedConnections: [],
+    unverifiedViaLocations: [],
     binarySections: [],
     diagnostics,
   }

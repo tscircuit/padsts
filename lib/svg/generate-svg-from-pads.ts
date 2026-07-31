@@ -4,6 +4,7 @@ import {
   type PadsBoardGeometry,
   type PadsGeometryCircle,
   type PadsGeometryPath,
+  type PadsGeometryPathSegment,
   type PadsGeometryPoint,
 } from "../geometry"
 import { type PadsDocument, parsePads } from "../parse-pads"
@@ -15,7 +16,9 @@ export interface GeneratePadsSvgOptions {
   boardColor?: string
   drillColor?: string
   gerberLayerColors?: Partial<Record<string, string>>
+  visibleGerberLayers?: string[]
   showBinarySectionSummary?: boolean
+  showUnverifiedConnections?: boolean
   showUnassignedVertices?: boolean
   showPlacements?: boolean
   showText?: boolean
@@ -37,6 +40,7 @@ interface RenderContext {
   boardClipAttribute: string
   drillColor: string
   layerColors: Record<string, string>
+  visibleGerberLayers?: Set<string>
 }
 
 interface ViaAperture {
@@ -62,6 +66,7 @@ const DEFAULT_GERBER_LAYER_COLORS: Record<string, string> = {
   Dwgs_User: "#8b9bb4",
   Keepout: "#d36ba6",
   Debug_Vertices: "#9ca3af",
+  Debug_Connections: "#56cfe1",
 }
 
 const escapeXml = (sourceText: string): string =>
@@ -83,6 +88,48 @@ const isFinitePoint = (point: PadsGeometryPoint): boolean =>
   Math.abs(point.x) < 1e12 &&
   Math.abs(point.y) < 1e12
 
+const normalizeDegrees = (angle: number): number => ((angle % 360) + 360) % 360
+
+const angleIsWithinArcSweep = ({
+  angle,
+  startAngle,
+  deltaAngle,
+}: {
+  angle: number
+  startAngle: number
+  deltaAngle: number
+}): boolean => {
+  if (Math.abs(deltaAngle) >= 360 - 1e-9) return true
+  const sweptAngle =
+    deltaAngle >= 0
+      ? normalizeDegrees(angle - startAngle)
+      : normalizeDegrees(startAngle - angle)
+  return sweptAngle <= Math.abs(deltaAngle) + 1e-9
+}
+
+const getArcExtentPoints = (
+  segment: Extract<PadsGeometryPathSegment, { kind: "arc" }>,
+): PadsGeometryPoint[] => {
+  const points = [segment.start, segment.end]
+  for (const cardinalAngle of [0, 90, 180, 270]) {
+    if (
+      !angleIsWithinArcSweep({
+        angle: cardinalAngle,
+        startAngle: segment.startAngle,
+        deltaAngle: segment.deltaAngle,
+      })
+    ) {
+      continue
+    }
+    const angleRadians = (cardinalAngle * Math.PI) / 180
+    points.push({
+      x: segment.center.x + segment.radius * Math.cos(angleRadians),
+      y: segment.center.y + segment.radius * Math.sin(angleRadians),
+    })
+  }
+  return points
+}
+
 const getPathPoints = (
   geometry: PadsBoardGeometry,
   includedKinds: Set<PadsGeometryPath["kind"]>,
@@ -92,6 +139,10 @@ const getPathPoints = (
     if (!includedKinds.has(path.kind)) continue
     for (const point of path.points) {
       if (isFinitePoint(point)) points.push(point)
+    }
+    for (const segment of path.segments ?? []) {
+      if (segment.kind !== "arc" || !isFinitePoint(segment.center)) continue
+      points.push(...getArcExtentPoints(segment).filter(isFinitePoint))
     }
   }
   return points
@@ -190,14 +241,72 @@ const pointInsideBounds = ({
   point.y >= bounds.minimumY &&
   point.y <= bounds.maximumY
 
-const getPathData = (points: PadsGeometryPoint[], closed: boolean): string => {
-  const finitePoints = points.filter(isFinitePoint)
+const getSegmentPathData = (
+  segments: PadsGeometryPathSegment[],
+  closed: boolean,
+): string => {
+  const firstSegment = segments[0]
+  if (!firstSegment || !isFinitePoint(firstSegment.start)) return ""
+
+  const commands = [
+    `M ${formatNumber(firstSegment.start.x)} ${formatNumber(firstSegment.start.y)}`,
+  ]
+  let currentPoint = firstSegment.start
+  for (const segment of segments) {
+    if (!isFinitePoint(segment.start) || !isFinitePoint(segment.end)) continue
+    if (
+      Math.abs(currentPoint.x - segment.start.x) >= 1e-6 ||
+      Math.abs(currentPoint.y - segment.start.y) >= 1e-6
+    ) {
+      commands.push(
+        `L ${formatNumber(segment.start.x)} ${formatNumber(segment.start.y)}`,
+      )
+    }
+
+    if (segment.kind === "line") {
+      commands.push(
+        `L ${formatNumber(segment.end.x)} ${formatNumber(segment.end.y)}`,
+      )
+    } else {
+      if (Math.abs(segment.deltaAngle) >= 360 - 1e-9) {
+        const startAngleRadians = (segment.startAngle * Math.PI) / 180
+        const oppositePoint = {
+          x: segment.center.x - segment.radius * Math.cos(startAngleRadians),
+          y: segment.center.y - segment.radius * Math.sin(startAngleRadians),
+        }
+        const sweepFlag = segment.deltaAngle >= 0 ? 1 : 0
+        commands.push(
+          `A ${formatNumber(segment.radius)} ${formatNumber(segment.radius)} 0 1 ${sweepFlag} ${formatNumber(oppositePoint.x)} ${formatNumber(oppositePoint.y)}`,
+          `A ${formatNumber(segment.radius)} ${formatNumber(segment.radius)} 0 1 ${sweepFlag} ${formatNumber(segment.end.x)} ${formatNumber(segment.end.y)}`,
+        )
+        currentPoint = segment.end
+        continue
+      }
+      const largeArcFlag = Math.abs(segment.deltaAngle) > 180 ? 1 : 0
+      const sweepFlag = segment.deltaAngle >= 0 ? 1 : 0
+      commands.push(
+        `A ${formatNumber(segment.radius)} ${formatNumber(segment.radius)} 0 ${largeArcFlag} ${sweepFlag} ${formatNumber(segment.end.x)} ${formatNumber(segment.end.y)}`,
+      )
+    }
+    currentPoint = segment.end
+  }
+
+  if (closed) commands.push("Z")
+  return commands.join(" ")
+}
+
+const getPathData = (path: PadsGeometryPath): string => {
+  if (path.segments && path.segments.length > 0) {
+    return getSegmentPathData(path.segments, path.closed)
+  }
+
+  const finitePoints = path.points.filter(isFinitePoint)
   if (finitePoints.length === 0) return ""
   const commands = finitePoints.map(
     (point, pointIndex) =>
       `${pointIndex === 0 ? "M" : "L"} ${formatNumber(point.x)} ${formatNumber(point.y)}`,
   )
-  if (closed && finitePoints.length >= 3) commands.push("Z")
+  if (path.closed && finitePoints.length >= 3) commands.push("Z")
   return commands.join(" ")
 }
 
@@ -254,6 +363,13 @@ const getLayerColor = ({
   return "#cccccc"
 }
 
+const shouldRenderLayer = (
+  context: RenderContext,
+  layerName: string,
+): boolean =>
+  context.visibleGerberLayers === undefined ||
+  context.visibleGerberLayers.has(layerName)
+
 const getMetadataAttributes = ({
   kind,
   layer,
@@ -307,13 +423,14 @@ const renderCopperPaths = (context: RenderContext): string => {
 
   return [...pathsByLayer.entries()]
     .map(([layerName, paths]) => {
+      if (!shouldRenderLayer(context, layerName)) return ""
       const color = getLayerColor({
         layerName,
         layerColors: context.layerColors,
       })
       const pathElements = paths
         .map((path) => {
-          const pathData = getPathData(path.points, path.closed)
+          const pathData = getPathData(path)
           if (!pathData) return ""
           const strokeWidth = getRenderedStrokeWidth({
             sourceWidth: path.width,
@@ -405,6 +522,7 @@ const renderCopperCircles = ({
 
   return [...circlesByLayer.entries()]
     .map(([layerName, circles]) => {
+      if (!shouldRenderLayer(context, layerName)) return ""
       const color = getLayerColor({
         layerName,
         layerColors: context.layerColors,
@@ -438,6 +556,7 @@ const renderDrills = ({
   context: RenderContext
   apertureByCircle: Map<PadsGeometryCircle, ViaAperture>
 }): string => {
+  if (!shouldRenderLayer(context, "Drill")) return ""
   const drillElements = context.geometry.circles
     .filter((circle) => circle.kind === "via")
     .map((circle) => {
@@ -452,10 +571,11 @@ const renderDrills = ({
 }
 
 const renderDrawingGeometry = (context: RenderContext): string => {
+  if (!shouldRenderLayer(context, "Dwgs_User")) return ""
   const drawingPaths = context.geometry.paths
     .filter((path) => path.kind === "drawing")
     .map((path) => {
-      const pathData = getPathData(path.points, path.closed)
+      const pathData = getPathData(path)
       if (!pathData) return ""
       const strokeWidth = getRenderedStrokeWidth({
         sourceWidth: path.width,
@@ -490,10 +610,11 @@ const renderDrawingGeometry = (context: RenderContext): string => {
 }
 
 const renderKeepouts = (context: RenderContext): string => {
+  if (!shouldRenderLayer(context, "Keepout")) return ""
   const keepoutPaths = context.geometry.paths
     .filter((path) => path.kind === "keepout")
     .map((path) => {
-      const pathData = getPathData(path.points, path.closed)
+      const pathData = getPathData(path)
       if (!pathData) return ""
       const strokeWidth = getRenderedStrokeWidth({
         sourceWidth: path.width,
@@ -546,7 +667,9 @@ const renderPlacements = (context: RenderContext): string => {
     layerName: "F_Silkscreen" | "B_Silkscreen"
     elements: string[]
   }): string => {
-    if (elements.length === 0) return ""
+    if (elements.length === 0 || !shouldRenderLayer(context, layerName)) {
+      return ""
+    }
     const color = getLayerColor({
       layerName,
       layerColors: context.layerColors,
@@ -567,6 +690,7 @@ const renderPlacements = (context: RenderContext): string => {
 }
 
 const renderTexts = (context: RenderContext): string => {
+  if (!shouldRenderLayer(context, "F_Silkscreen")) return ""
   const textElements = context.geometry.texts
     .slice(0, 2000)
     .map((text) => {
@@ -593,10 +717,11 @@ const renderTexts = (context: RenderContext): string => {
 }
 
 const renderOutline = (context: RenderContext): string => {
+  if (!shouldRenderLayer(context, "Edge_Cuts")) return ""
   const outlineElements = context.geometry.paths
     .filter((path) => path.kind === "outline")
     .map((path) => {
-      const pathData = getPathData(path.points, path.closed)
+      const pathData = getPathData(path)
       if (!pathData) return ""
       const strokeWidth = getRenderedStrokeWidth({
         sourceWidth: path.width,
@@ -616,6 +741,7 @@ const renderOutline = (context: RenderContext): string => {
 }
 
 const renderUnassignedVertices = (context: RenderContext): string => {
+  if (!shouldRenderLayer(context, "Debug_Vertices")) return ""
   const pointRadius = context.minimumFeatureSize * 0.8
   const elements: string[] = []
   for (const point of context.geometry.unassignedVertices) {
@@ -637,6 +763,39 @@ const renderUnassignedVertices = (context: RenderContext): string => {
     layerColors: context.layerColors,
   })
   return `<g id="pads-Debug_Vertices" data-gerber-layer="Debug_Vertices" color="${color}" fill="currentColor" fill-opacity="0.4"${context.boardClipAttribute}>${elements.join("")}</g>`
+}
+
+const renderUnverifiedConnections = (context: RenderContext): string => {
+  if (!shouldRenderLayer(context, "Debug_Connections")) return ""
+  const strokeWidth = context.minimumFeatureSize * 0.75
+  const connectionElements = context.geometry.unverifiedConnections
+    .filter((path) =>
+      path.points.every((point) =>
+        pointInsideBounds({ point, bounds: context.bounds }),
+      ),
+    )
+    .map((path) => {
+      const pathData = getPathData(path)
+      return pathData
+        ? `<path data-kind="unverified-connection" d="${pathData}" fill="none" stroke="currentColor" stroke-width="${formatNumber(strokeWidth)}" stroke-dasharray="${formatNumber(strokeWidth * 5)} ${formatNumber(strokeWidth * 4)}"/>`
+        : ""
+    })
+    .join("")
+  const pointRadius = context.minimumFeatureSize * 1.1
+  const viaElements = context.geometry.unverifiedViaLocations
+    .filter((point) => pointInsideBounds({ point, bounds: context.bounds }))
+    .map(
+      (point) =>
+        `<circle data-kind="unverified-via-location" cx="${formatNumber(point.x)}" cy="${formatNumber(point.y)}" r="${formatNumber(pointRadius)}"/>`,
+    )
+    .join("")
+  if (!connectionElements && !viaElements) return ""
+
+  const color = getLayerColor({
+    layerName: "Debug_Connections",
+    layerColors: context.layerColors,
+  })
+  return `<g id="pads-Debug_Connections" data-gerber-layer="Debug_Connections" color="${color}" fill="currentColor" fill-opacity="0.55" stroke="currentColor"${context.boardClipAttribute}>${connectionElements}${viaElements}</g>`
 }
 
 const renderBinarySectionSummary = ({
@@ -682,7 +841,8 @@ export const generateSvgFromPadsGeometry = (
   const totalWidth = Math.max(1, options.width ?? 1200)
   const totalHeight = Math.max(
     1,
-    options.height ?? (totalWidth * boundsHeight) / boundsWidth,
+    options.height ??
+      Math.min(2400, Math.max(240, (totalWidth * boundsHeight) / boundsWidth)),
   )
   const minimumFeatureSize = Math.max(
     boundsWidth / totalWidth,
@@ -713,10 +873,13 @@ export const generateSvgFromPadsGeometry = (
     boardClipAttribute,
     drillColor,
     layerColors,
+    visibleGerberLayers: options.visibleGerberLayers
+      ? new Set(options.visibleGerberLayers)
+      : undefined,
   }
   const outlineClipPaths = outlinePaths
     .map((path) => {
-      const pathData = getPathData(path.points, true)
+      const pathData = getPathData({ ...path, closed: true })
       return pathData ? `<path d="${pathData}"/>` : ""
     })
     .join("")
@@ -725,12 +888,15 @@ export const generateSvgFromPadsGeometry = (
     version: geometry.version,
     layerCount: geometry.layerCount,
     diagnostics: geometry.diagnostics,
+    visibleGerberLayers: options.visibleGerberLayers,
     counts: {
       paths: geometry.paths.length,
       circles: geometry.circles.length,
       placements: geometry.placements.length,
       texts: geometry.texts.length,
       unassignedVertices: geometry.unassignedVertices.length,
+      unverifiedConnections: geometry.unverifiedConnections.length,
+      unverifiedViaLocations: geometry.unverifiedViaLocations.length,
     },
   }
 
@@ -761,6 +927,9 @@ export const generateSvgFromPadsGeometry = (
     options.showText === false ? "" : renderTexts(context),
     options.showUnassignedVertices === true
       ? renderUnassignedVertices(context)
+      : "",
+    options.showUnverifiedConnections === true
+      ? renderUnverifiedConnections(context)
       : "",
     renderOutline(context),
     "</g>",

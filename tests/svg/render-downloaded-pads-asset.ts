@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { generateSvgFromPads } from "../../lib"
+import { type GeneratePadsSvgOptions, generateSvgFromPads } from "../../lib"
 import {
   downloadableTestAssets,
   getDownloadedTestAssetPath,
@@ -25,15 +25,90 @@ export const isSvgTestAssetAvailable = async (
 
 export const renderDownloadedPadsAsset = async (
   asset: SvgTestAsset,
+  options: GeneratePadsSvgOptions = {},
 ): Promise<string> => {
   const sourceBytes = await Bun.file(getDownloadedTestAssetPath(asset)).bytes()
-  return generateSvgFromPads(sourceBytes)
+  return generateSvgFromPads(sourceBytes, options)
 }
 
-export const expectGerberStyleSvg = (svg: string): void => {
+const COPPER_VIEW_LAYERS = [
+  "F_Cu",
+  "In1_Cu",
+  "In2_Cu",
+  "In3_Cu",
+  "In4_Cu",
+  "In5_Cu",
+  "In6_Cu",
+  "In7_Cu",
+  "In8_Cu",
+  "B_Cu",
+  "Drill",
+  "Edge_Cuts",
+]
+
+const visualSnapshotViews: {
+  name: string
+  options: GeneratePadsSvgOptions
+}[] = [
+  {
+    name: "copper",
+    options: {
+      visibleGerberLayers: COPPER_VIEW_LAYERS,
+      showPlacements: false,
+      showText: false,
+    },
+  },
+  {
+    name: "structure",
+    options: {
+      visibleGerberLayers: [
+        "Dwgs_User",
+        "Keepout",
+        "Edge_Cuts",
+        "Debug_Vertices",
+        "Debug_Connections",
+      ],
+      showPlacements: false,
+      showText: false,
+      showUnassignedVertices: true,
+      showUnverifiedConnections: true,
+    },
+  },
+  {
+    name: "assembly",
+    options: {
+      visibleGerberLayers: ["F_Silkscreen", "B_Silkscreen", "Edge_Cuts"],
+    },
+  },
+]
+
+export const expectVisualSnapshotViews = async ({
+  asset,
+  testFilePath,
+}: {
+  asset: SvgTestAsset
+  testFilePath: string
+}): Promise<void> => {
+  for (const view of visualSnapshotViews) {
+    const svg = await renderDownloadedPadsAsset(asset, view.options)
+    expectGerberStyleSvg(svg, {
+      allowBinarySectionSummary: view.options.showBinarySectionSummary === true,
+    })
+    await expect(svg).toMatchSvgSnapshot(testFilePath, view.name)
+  }
+}
+
+export const expectGerberStyleSvg = (
+  svg: string,
+  {
+    allowBinarySectionSummary = false,
+  }: { allowBinarySectionSummary?: boolean } = {},
+): void => {
   expect(svg).toContain('stroke-linecap="round"')
   expect(svg).toContain('fill-rule="evenodd"')
   expect(svg).toContain('transform="scale(1,-1)"')
   expect(svg).toContain('data-kind="negative-space"')
-  expect(svg).not.toContain("BINARY SECTIONS")
+  if (!allowBinarySectionSummary) {
+    expect(svg).not.toContain("BINARY SECTIONS")
+  }
 }

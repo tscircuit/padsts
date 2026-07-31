@@ -122,11 +122,12 @@ with a typed ASCII AST.
 - [ ] Parse every line-piece kind into typed geometry.
   - [ ] Open and closed polylines.
   - [ ] Circles.
-  - [ ] Arcs with exact center, radius, direction, and sweep.
+  - [x] Arc-annotated `LINES` vertices with exact center, radius, direction, and
+    sweep.
   - [ ] Curves or other version-specific primitives.
   - [ ] Board cutouts and nested contours.
   - [ ] Copper and keepout contours.
-- [ ] Stop rendering arc-annotated vertices as straight segments.
+- [x] Stop rendering arc-annotated `LINES` vertices as straight segments.
 - [ ] Decode line styles, widths, restrictions, ownership, and layer semantics.
 - [ ] Parse text alignment, font, justification, visibility, ownership, and
   multiline content.
@@ -150,6 +151,8 @@ with a typed ASCII AST.
 
 - [x] Extract basic `PART` reference, footprint name, position, rotation, and a
   candidate bottom-side flag for visualization.
+- [x] Accept numeric footprint names such as `0402` and `0805` without
+  misclassifying part text records as placements.
 - [ ] Parse `PARTDECAL` footprint definitions.
   - [ ] Decal origin and units.
   - [ ] Pads and terminals.
@@ -173,6 +176,8 @@ with a typed ASCII AST.
 
 - [x] Extract basic ASCII route segments and net names heuristically.
 - [x] Detect some inline via markers heuristically.
+- [x] Omit layer-0 ratlines from fabrication geometry.
+- [x] Require an explicit via name instead of treating thermal flags as vias.
 - [ ] Parse `NET` and nested `SIGNAL` records.
   - [ ] Net names and stable IDs.
   - [ ] Part/pin membership.
@@ -278,7 +283,7 @@ partial and based on a small number of observed record offsets.
 - [ ] Verify section-8 layouts for each supported version.
 - [ ] Decode text ownership, layer, position, height, stroke width, rotation,
   mirroring, alignment, font, visibility, and content.
-- [ ] Reject implausible field combinations instead of rendering garbage text.
+- [x] Reject implausible field combinations instead of rendering garbage text.
 - [ ] Fix the `0x2021` fixture's incorrect text position, rotation, and content.
 - [ ] Add entity-count and field-value assertions for known text fixtures.
 
@@ -310,6 +315,8 @@ partial and based on a small number of observed record offsets.
 - [x] Experimentally read candidate connection records from section 24.
 - [x] Experimentally read candidate route vertices from section 60.
 - [x] Experimentally read candidate via/end-point positions from section 59.
+- [x] Keep unverified route/via candidates out of fabrication layers and expose
+  them only through an opt-in debug layer.
 - [ ] Replace route-marker scanning with verified versioned record layouts.
 - [ ] Verify whether route indices are zero-based, one-based, global, or scoped.
 - [ ] Decode connection ownership and endpoint types.
@@ -326,9 +333,10 @@ partial and based on a small number of observed record offsets.
   - [ ] Start/end layers.
   - [ ] Net.
   - [ ] Via type.
-- [ ] Remove hard-coded binary via radius and annular width.
-- [ ] Eliminate the long spurious segments visible in the EMS4 and TMS SVG
-  snapshots.
+- [x] Remove hard-coded binary via radius and annular width from fabrication
+  geometry.
+- [x] Eliminate the long spurious segments from EMS4 and TMS fabrication SVG
+  snapshots by quarantining unverified candidates in the debug view.
 - [ ] Add route invariants.
   - [ ] Referenced vertex indices exist.
   - [ ] Segment endpoints are within credible board bounds.
@@ -388,7 +396,8 @@ partial and based on a small number of observed record offsets.
 - [x] Keep binary section and unresolved-vertex overlays opt-in.
 - [x] Snapshot every downloaded fixture with
   `toMatchSvgSnapshot(import.meta.path)`.
-- [ ] Render exact arcs and curves.
+- [x] Render exact circular arcs.
+- [ ] Render other curve primitives.
 - [ ] Render footprint pads and graphics from decoded decals.
 - [ ] Render verified pad-stack shapes and drill geometry.
 - [ ] Render correct binary layer assignments.
@@ -400,16 +409,16 @@ partial and based on a small number of observed record offsets.
 - [ ] Convert fabrication text to deterministic vector strokes so snapshots do
   not depend on system fonts.
 - [ ] Make bounds robust against corrupt or partially decoded entities.
-  - [ ] Prevent pathological intrinsic sizes such as the very tall `0x2021`
+  - [x] Prevent pathological intrinsic sizes such as the very tall `0x2021`
     snapshot.
   - [ ] Report excluded outliers rather than silently trimming them.
   - [ ] Prefer verified board edges over placements and text.
 - [ ] Add selectable render modes.
-  - [ ] Single fabrication layer.
+  - [x] Arbitrary single or multiple fabrication layers.
   - [ ] Top composite.
   - [ ] Bottom composite.
-  - [ ] Full copper overlay.
-  - [ ] Debug/coverage view.
+  - [x] Full copper overlay.
+  - [x] Debug/coverage view.
 - [ ] Use stable, source-linked element IDs and `data-*` attributes.
 - [ ] Add semantic assertions alongside image snapshots.
   - [ ] Expected layer names.
@@ -471,8 +480,10 @@ partial and based on a small number of observed record offsets.
 
 - [x] Pin downloadable fixtures to a source commit.
 - [x] Verify downloaded fixtures with expected byte lengths and Git blob hashes.
-- [x] Cover two ASCII boards and native binary versions `0x2021`, `0x2025`,
+- [x] Cover five ASCII boards and native binary versions `0x2021`, `0x2025`,
   `0x2026`, and `0x2027`.
+- [x] Keep same-board ASCII references for the Dexter, EMS4, LCORE2, and TMS
+  native binary fixtures.
 - [x] Keep downloaded fixture contents gitignored.
 - [x] Run parse and byte-for-byte round-trip tests for downloaded fixtures.
 - [x] Run SVG snapshot tests for downloaded fixtures.

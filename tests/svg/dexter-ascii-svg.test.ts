@@ -7,16 +7,17 @@ import {
   renderDownloadedPadsAsset,
 } from "./render-downloaded-pads-asset"
 
-const asset = getSvgTestAsset("kicad-synthetic-multilayer-ascii")
+const asset = getSvgTestAsset("kicad-dexter-motor-control-ascii")
 const isAvailable = await isSvgTestAssetAvailable(asset)
 
 test.skipIf(!isAvailable)(
-  "renders the synthetic multilayer ASCII board",
+  "renders the Dexter ASCII reference board",
   async () => {
     const svg = await renderDownloadedPadsAsset(asset)
     expectGerberStyleSvg(svg)
     expect(svg).toContain('data-kind="outline"')
-    expect(svg).toContain('data-gerber-layer="Edge_Cuts"')
+    expect(svg).toContain('data-kind="placement"')
+    expect(svg).toContain('data-gerber-layer="F_Cu"')
     await expect(svg).toMatchSvgSnapshot(import.meta.path)
     await expectVisualSnapshotViews({
       asset,

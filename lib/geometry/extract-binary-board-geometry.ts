@@ -229,10 +229,12 @@ const addTextRecords = ({
   document,
   origin,
   texts,
+  diagnostics,
 }: {
   document: PadsBinaryDocument
   origin: PadsGeometryPoint
   texts: PadsGeometryText[]
+  diagnostics: string[]
 }): void => {
   const textSection = getSection(document, 8)
   const stringPoolSection = getSection(document, 57)
@@ -242,6 +244,7 @@ const addTextRecords = ({
   const recordSize = getBytesPerRecord(textSection.directoryEntry)
   if (!Number.isInteger(recordSize) || recordSize < 72) return
 
+  let rejectedTextCount = 0
   for (
     let recordIndex = 0;
     recordIndex < textSection.recordCount;
@@ -272,6 +275,21 @@ const addTextRecords = ({
       byteOffset: stringOffset,
     })
     if (!content) continue
+    if (
+      content !== content.trim() ||
+      content.length > 512 ||
+      height <= 0 ||
+      height > 100_000_000 ||
+      strokeWidth <= 0 ||
+      strokeWidth > height ||
+      strokeWidth < height / 100 ||
+      Math.abs(rawRotation) > 360 * ANGLE_SCALE ||
+      layer === 0 ||
+      layer > 64
+    ) {
+      rejectedTextCount++
+      continue
+    }
 
     texts.push({
       content,
@@ -282,6 +300,12 @@ const addTextRecords = ({
       mirrored: false,
       layer,
     })
+  }
+
+  if (rejectedTextCount > 0) {
+    diagnostics.push(
+      `${rejectedTextCount} binary text candidates rejected because decoded fields are implausible`,
+    )
   }
 }
 
@@ -316,17 +340,17 @@ const detectRouteMarkerOffset = (
   return bestHitCount >= sampleCount / 2 ? bestOffset : undefined
 }
 
-const addRouteGeometry = ({
+const addUnverifiedRouteCandidates = ({
   document,
   origin,
-  paths,
-  circles,
+  unverifiedConnections,
+  unverifiedViaLocations,
   diagnostics,
 }: {
   document: PadsBinaryDocument
   origin: PadsGeometryPoint
-  paths: PadsGeometryPath[]
-  circles: PadsGeometryCircle[]
+  unverifiedConnections: PadsGeometryPath[]
+  unverifiedViaLocations: PadsGeometryPoint[]
   diagnostics: string[]
 }): void => {
   if (document.version === 0x2021) {
@@ -390,7 +414,7 @@ const addRouteGeometry = ({
     const endPoint = readRouteVertex(endIndex)
     if (!startPoint || !endPoint) continue
 
-    paths.push({
+    unverifiedConnections.push({
       kind: "route",
       points: [startPoint, endPoint],
       closed: false,
@@ -415,13 +439,13 @@ const addRouteGeometry = ({
     const x = viaReader.readInt32(recordOffset + markerOffset + 1)
     const y = viaReader.readInt32(recordOffset + markerOffset + 5)
     if (x === undefined || y === undefined) continue
-    circles.push({
-      kind: "via",
-      center: toBoardPoint({ x, y, origin }),
-      radius: 100_000,
-      width: 25_000,
-      layer: 0,
-    })
+    unverifiedViaLocations.push(toBoardPoint({ x, y, origin }))
+  }
+
+  if (unverifiedConnections.length > 0 || unverifiedViaLocations.length > 0) {
+    diagnostics.push(
+      "native binary route and via candidates are withheld from fabrication layers pending record-reference validation",
+    )
   }
 }
 
@@ -516,12 +540,20 @@ export const extractBinaryBoardGeometry = (
   const circles: PadsGeometryCircle[] = []
   const texts: PadsGeometryText[] = []
   const placements: PadsGeometryPlacement[] = []
+  const unverifiedConnections: PadsGeometryPath[] = []
+  const unverifiedViaLocations: PadsGeometryPoint[] = []
   const diagnostics: string[] = []
   const vertices = readLineVertices({ document, origin })
 
   addDecodedOutline({ document, vertices, paths, diagnostics })
-  addRouteGeometry({ document, origin, paths, circles, diagnostics })
-  addTextRecords({ document, origin, texts })
+  addUnverifiedRouteCandidates({
+    document,
+    origin,
+    unverifiedConnections,
+    unverifiedViaLocations,
+    diagnostics,
+  })
+  addTextRecords({ document, origin, texts, diagnostics })
   addPlacementGeometry({ document, origin, placements, diagnostics })
 
   const layerCount = getLayerCount(document)
@@ -535,6 +567,8 @@ export const extractBinaryBoardGeometry = (
     texts,
     placements,
     unassignedVertices: vertices,
+    unverifiedConnections,
+    unverifiedViaLocations,
     binarySections: getSectionSummaries(document),
     diagnostics,
   }
