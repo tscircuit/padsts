@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-test("the built package exposes parser, inspection, conversion, and SVG APIs", async () => {
+test("the built package exposes parser, inspection, report, and SVG APIs", async () => {
   // Keep the build artifact out of TypeScript's source graph. `bun run check`
   // typechecks a clean checkout before building, then this runtime import
   // verifies the generated package after the build step.
@@ -12,7 +12,6 @@ test("the built package exposes parser, inspection, conversion, and SVG APIs", a
     inspectPads: expect.any(Function),
     validatePads: expect.any(Function),
     generateSvgFromPads: expect.any(Function),
-    toCircuitJson: expect.any(Function),
     createPadsConversionReport: expect.any(Function),
   })
 })

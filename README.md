@@ -19,7 +19,6 @@ discarded.
 - Normalize decoded coordinates to explicit nanometers while retaining source
   units and provenance.
 - Inspect, validate, report conversion coverage, and produce Gerber-style SVG.
-- Experimentally convert exactly representable geometry to Circuit JSON.
 
 Native binary semantics remain partial. Every non-empty section is inventoried
 as decoded, partial, or opaque; unverified route and via candidates remain
@@ -50,7 +49,6 @@ padsts validate board.asc --strict
 padsts to-svg board.asc -o board.svg --layers F_Cu,B_Cu,Drill,Edge_Cuts
 padsts to-svg board.asc -o detail.svg --viewbox 0,0,25000000,15000000
 padsts to-svg board.asc -o detail.svg --viewbox 0,0,1000,600 --viewbox-source-units
-padsts to-circuit-json board.asc -o board.circuit.json
 padsts report board.pcb --strict
 ```
 
@@ -146,13 +144,12 @@ Artwork is clipped to the decoded board outline by default. Set
 inspects staged or off-board parts; the physical board substrate remains
 outline-clipped.
 
-## Inspection and conversion reports
+## Inspection and validation reports
 
 ```ts
 import {
   createPadsConversionReport,
   inspectPads,
-  toCircuitJson,
   validatePads,
 } from "padsts"
 
@@ -162,20 +159,19 @@ console.log(inspection.sections, inspection.coverage)
 const validation = validatePads(sourceBytes, { strict: true })
 if (!validation.valid) console.error(validation.report.diagnostics)
 
-const circuitJson = toCircuitJson(sourceBytes)
 const report = createPadsConversionReport(sourceBytes, { strict: true })
 ```
 
 Inspection and report objects are JSON-serializable and schema-versioned.
-Strict conversion refuses unsupported, malformed, approximate, inferred,
+Strict validation reports unsupported, malformed, approximate, inferred,
 opaque, or unaccounted source data. Every report diagnostic includes source
-provenance; normalized entities skipped by the Circuit JSON adapter are listed
-with their stable entity IDs. Circuit JSON output currently maps verified
-line-only board outlines, components with decoded extents, pads, holes, vias,
-straight traces, and straight silkscreen paths. CI validates every emitted
-element from the synthetic and pinned real-world fixtures against
-`circuit-json@0.0.456`; the adapter remains experimental while nets, pours,
-thermal relief, and complete binary geometry are unfinished.
+provenance when available.
+
+Circuit JSON conversion lives in
+[`pads-to-circuit-json`](https://github.com/tscircuit/pads-to-circuit-json).
+That adapter consumes the parsed document and normalized geometry from this
+package while keeping target-specific mapping policy and visual comparisons out
+of the lossless parser.
 
 ## Why lossless parsing comes first
 

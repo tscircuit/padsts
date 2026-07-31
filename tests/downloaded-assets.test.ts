@@ -1,11 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { any_circuit_element } from "circuit-json"
 import {
   detectPadsFormat,
   extractPadsBoardGeometry,
   inspectPads,
   parsePads,
-  toCircuitJson,
 } from "../lib"
 import {
   calculateGitBlobSha,
@@ -43,15 +41,6 @@ describe("downloaded PADS fixtures", () => {
 
         const document = parsePads(sourceBytes)
         expect(document.kind).toBe(asset.format)
-
-        for (const [index, element] of toCircuitJson(document).entries()) {
-          const result = any_circuit_element.safeParse(element)
-          if (!result.success) {
-            throw new Error(
-              `${asset.id} Circuit JSON element ${index} (${element.type}) failed schema validation: ${result.error.message}`,
-            )
-          }
-        }
 
         const expected = expectedResultsByAssetId[asset.id]
         expect(expected).toBeDefined()

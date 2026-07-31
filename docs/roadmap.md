@@ -38,8 +38,9 @@ reports without weakening round-trip behavior.
 
 ## Milestone 6: conversion adapters
 
-- Extend the experimental `toCircuitJson(document)` exact subset as semantic
-  coverage becomes conversion-grade.
+- Implement PADS-to-Circuit JSON mapping in the separate
+  [`pads-to-circuit-json`](https://github.com/tscircuit/pads-to-circuit-json)
+  package.
 - Optionally add a KiCad adapter through `kicadts`.
 - Emit a conversion report listing every skipped or approximate source record.
 

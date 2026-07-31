@@ -552,22 +552,11 @@ partial and based on a small number of observed record offsets.
 
 ### Circuit JSON
 
-- [x] Implement experimental `toCircuitJson(document)`.
-- [ ] Map board outline and cutouts.
-  - [x] Map exact line-only board outlines.
-  - [ ] Map board cutouts.
-- [ ] Map layer stack.
-- [ ] Map components, footprints, pads, holes, and text.
-  - [x] Map placed components with decoded extents, pads, and holes.
-  - [ ] Map reusable footprints and text.
-- [ ] Map nets, ports/pins, traces, vias, and connectivity.
-- [ ] Map pours, keepouts, and supported rule data.
-- [x] Preserve PADS source IDs in stable Circuit JSON entity IDs.
-- [ ] Emit warnings for every approximation or skipped entity.
-- [x] Validate generated Circuit JSON against the current schema.
-- [ ] Render generated Circuit JSON and compare it with the PADS SVG.
-- [ ] Generate Gerber/Excellon files from converted Circuit JSON and compare
-  them with known-good fabrication output.
+- [x] Move Circuit JSON mapping into the separate
+      [`pads-to-circuit-json`](https://github.com/tscircuit/pads-to-circuit-json)
+      package.
+- [x] Keep parser, normalized geometry, provenance, and SVG rendering APIs in
+      `padsts` without target-specific Circuit JSON policy.
 
 ### KiCad and fabrication adapters
 
