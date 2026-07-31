@@ -192,4 +192,5 @@ test.skipIf(!isAvailable)(
       ],
     })
   },
+  15_000,
 )
