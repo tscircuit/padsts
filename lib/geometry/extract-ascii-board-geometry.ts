@@ -4,9 +4,15 @@ import {
   tokenizePadsAsciiRecord,
 } from "../ascii"
 import type { PadsSourceProvenance } from "../source-provenance"
+import { getPadsDocumentSourceProvenance } from "../source-provenance"
+import {
+  type AsciiPartDecalTextTemplate,
+  parseAsciiPartDecalTextTemplate,
+} from "./ascii-part-decal-text"
 import { normalizeGeometryUnits } from "./normalize-geometry-units"
 import type {
   PadsBoardGeometry,
+  PadsGeometryAntipad,
   PadsGeometryCircle,
   PadsGeometryCircleKind,
   PadsGeometryHole,
@@ -18,6 +24,7 @@ import type {
   PadsGeometryPlacement,
   PadsGeometryPoint,
   PadsGeometryText,
+  PadsGeometryThermalRelief,
   PadsGeometryViaPad,
 } from "./pads-board-geometry"
 
@@ -151,8 +158,7 @@ const getPathKind = (objectType: string): PadsGeometryPathKind => {
 
 const getCircleKind = (
   pathKind: PadsGeometryPathKind,
-): PadsGeometryCircleKind =>
-  pathKind === "route" || pathKind === "outline" ? "drawing" : pathKind
+): PadsGeometryCircleKind => (pathKind === "route" ? "drawing" : pathKind)
 
 const isLineObjectHeader = (lineTokens: string[]): boolean =>
   lineTokens.length >= 5 &&
@@ -276,7 +282,9 @@ const addLineSectionGeometry = ({
       }
 
       if (
-        (pieceKind === "CIRCLE" || pieceKind === "KPTCIR") &&
+        (pieceKind === "CIRCLE" ||
+          pieceKind === "BRDCIR" ||
+          pieceKind === "KPTCIR") &&
         points.length >= 2
       ) {
         const firstPoint = points[0]
@@ -353,11 +361,18 @@ interface AsciiViaDefinition {
 }
 
 interface AsciiViaPadDefinition {
+  source?: PadsSourceProvenance
   sourceLevel: number
   radius: number
   shape?: "circle" | "square"
   shapeCode: string
-  kind: "conductive" | "negative" | "unsupported"
+  kind: "conductive" | "negative" | "thermal" | "unsupported"
+  thermal?: {
+    rotation: number
+    outerDiameter: number
+    spokeWidth: number
+    spokeCount: number
+  }
 }
 
 const parseViaDefinitions = ({
@@ -422,22 +437,58 @@ const parseViaDefinitions = ({
         ) {
           continue
         }
+        const shape =
+          shapeCode === "R" || shapeCode === "RA" || shapeCode === "RT"
+            ? "circle"
+            : shapeCode === "S" || shapeCode === "SA" || shapeCode === "ST"
+              ? "square"
+              : undefined
+        const isThermal = shapeCode === "RT" || shapeCode === "ST"
+        const firstThermalValue = parseFiniteNumber(stackTokens[3])
+        const secondThermalValue = parseFiniteNumber(stackTokens[4])
+        // The published format is orientation then outer diameter. Some
+        // PADS BASIC exports (including KiCad's pinned TMS fixture) reverse
+        // those two fields; a dimension-sized first value makes that variant
+        // unambiguous.
+        const usesDimensionFirstThermalOrder =
+          isThermal &&
+          firstThermalValue !== undefined &&
+          secondThermalValue !== undefined &&
+          Math.abs(firstThermalValue) > 360 &&
+          Math.abs(secondThermalValue) <= 360
         pads.push({
+          source: section.records[lineIndex - 1]?.provenance,
           sourceLevel: Math.trunc(sourceLevel),
           radius: diameter / 2,
-          shape:
-            shapeCode === "R"
-              ? "circle"
-              : shapeCode === "S"
-                ? "square"
-                : undefined,
+          shape,
           shapeCode,
           kind:
             shapeCode === "R" || shapeCode === "S"
               ? "conductive"
               : shapeCode === "RA" || shapeCode === "SA"
                 ? "negative"
-                : "unsupported",
+                : isThermal
+                  ? "thermal"
+                  : "unsupported",
+          ...(isThermal
+            ? {
+                thermal: {
+                  rotation: usesDimensionFirstThermalOrder
+                    ? secondThermalValue
+                    : (firstThermalValue ?? 0),
+                  outerDiameter: Math.abs(
+                    (usesDimensionFirstThermalOrder
+                      ? firstThermalValue
+                      : secondThermalValue) ?? diameter,
+                  ),
+                  spokeWidth: Math.abs(parseFiniteNumber(stackTokens[5]) ?? 0),
+                  spokeCount: Math.max(
+                    0,
+                    Math.trunc(parseFiniteNumber(stackTokens[6]) ?? 0),
+                  ),
+                },
+              }
+            : {}),
         })
       }
 
@@ -491,6 +542,8 @@ const resolveViaPadStack = ({
   startLayer: number
   endLayer: number
   copperPads: PadsGeometryViaPad[]
+  thermalReliefs: Array<Omit<PadsGeometryThermalRelief, "center">>
+  antipads: Array<Omit<PadsGeometryAntipad, "center">>
   unsupportedShapeCodes: string[]
 } => {
   const rawStartLayer = requestedStartLayer ?? definition.startLayer ?? 1
@@ -509,45 +562,85 @@ const resolveViaPadStack = ({
       Math.max(Math.trunc(rawStartLayer), Math.trunc(rawEndLayer)),
     ),
   )
-  const padBySpecificLayer = new Map<number, AsciiViaPadDefinition>()
-  let topPad: AsciiViaPadDefinition | undefined
-  let innerPad: AsciiViaPadDefinition | undefined
-  let bottomPad: AsciiViaPadDefinition | undefined
+  const padsByLevel = new Map<number, AsciiViaPadDefinition[]>()
   for (const pad of definition.pads) {
-    if (pad.sourceLevel === -2) topPad = pad
-    else if (pad.sourceLevel === -1) innerPad = pad
-    else if (pad.sourceLevel === 0) bottomPad = pad
-    else if (pad.sourceLevel > 0) {
-      padBySpecificLayer.set(pad.sourceLevel, pad)
-    }
+    const levelPads = padsByLevel.get(pad.sourceLevel) ?? []
+    levelPads.push(pad)
+    padsByLevel.set(pad.sourceLevel, levelPads)
   }
 
   const copperPads: PadsGeometryViaPad[] = []
+  const thermalReliefs: Array<Omit<PadsGeometryThermalRelief, "center">> = []
+  const antipads: Array<Omit<PadsGeometryAntipad, "center">> = []
   const unsupportedShapeCodes: string[] = []
   for (let layer = startLayer; layer <= endLayer; layer++) {
-    const genericPad =
+    let genericPads =
       startLayer === endLayer
-        ? (topPad ?? bottomPad ?? innerPad)
+        ? (padsByLevel.get(-2) ??
+          padsByLevel.get(0) ??
+          padsByLevel.get(-1) ??
+          [])
         : layer === startLayer
-          ? topPad
+          ? (padsByLevel.get(-2) ?? [])
           : layer === endLayer
-            ? bottomPad
-            : innerPad
-    const pad = padBySpecificLayer.get(layer) ?? genericPad
-    if (!pad) continue
-    if (pad.kind === "unsupported") {
-      unsupportedShapeCodes.push(pad.shapeCode)
-      continue
+            ? (padsByLevel.get(0) ?? [])
+            : (padsByLevel.get(-1) ?? [])
+    if (genericPads.length === 0 && layer > startLayer && layer < endLayer) {
+      genericPads = padsByLevel.get(-2) ?? padsByLevel.get(0) ?? []
     }
-    if (pad.kind === "negative" || !pad.shape) continue
-    copperPads.push({
-      layer,
-      radius: pad.radius,
-      shape: pad.shape,
-    })
+    const specificPads = padsByLevel.get(layer) ?? []
+    const getPadsForKind = (kind: AsciiViaPadDefinition["kind"]) => {
+      const specific = specificPads.filter((pad) => pad.kind === kind)
+      return specific.length > 0
+        ? specific
+        : genericPads.filter((pad) => pad.kind === kind)
+    }
+
+    const conductivePad = getPadsForKind("conductive").sort(
+      (first, second) => second.radius - first.radius,
+    )[0]
+    if (conductivePad?.shape) {
+      copperPads.push({
+        layer,
+        radius: conductivePad.radius,
+        shape: conductivePad.shape,
+      })
+    }
+    for (const pad of getPadsForKind("thermal")) {
+      if (!pad.shape || !pad.thermal) continue
+      thermalReliefs.push({
+        source: pad.source,
+        layer,
+        shape: pad.shape,
+        rotation: pad.thermal.rotation,
+        innerDiameter: pad.radius * 2,
+        outerDiameter: pad.thermal.outerDiameter,
+        spokeWidth: pad.thermal.spokeWidth,
+        spokeCount: pad.thermal.spokeCount,
+      })
+    }
+    for (const pad of getPadsForKind("negative")) {
+      if (!pad.shape) continue
+      antipads.push({
+        source: pad.source,
+        layer,
+        shape: pad.shape,
+        diameter: pad.radius * 2,
+      })
+    }
+    for (const pad of getPadsForKind("unsupported")) {
+      unsupportedShapeCodes.push(pad.shapeCode)
+    }
   }
 
-  return { startLayer, endLayer, copperPads, unsupportedShapeCodes }
+  return {
+    startLayer,
+    endLayer,
+    copperPads,
+    thermalReliefs,
+    antipads,
+    unsupportedShapeCodes,
+  }
 }
 
 const addRouteSectionGeometry = ({
@@ -556,6 +649,8 @@ const addRouteSectionGeometry = ({
   viaDefinitions,
   paths,
   circles,
+  thermalReliefs,
+  antipads,
   unverifiedViaLocations,
   diagnostics,
 }: {
@@ -564,6 +659,8 @@ const addRouteSectionGeometry = ({
   viaDefinitions: Map<string, AsciiViaDefinition>
   paths: PadsGeometryPath[]
   circles: PadsGeometryCircle[]
+  thermalReliefs: PadsGeometryThermalRelief[]
+  antipads: PadsGeometryAntipad[]
   unverifiedViaLocations: PadsGeometryPoint[]
   diagnostics: string[]
 }): void => {
@@ -638,6 +735,22 @@ const addRouteSectionGeometry = ({
       )
       return
     }
+    thermalReliefs.push(
+      ...resolvedPadStack.thermalReliefs.map((thermal) => ({
+        ...thermal,
+        center: location,
+        viaName: name,
+        netName,
+      })),
+    )
+    antipads.push(
+      ...resolvedPadStack.antipads.map((antipad) => ({
+        ...antipad,
+        center: location,
+        viaName: name,
+        netName,
+      })),
+    )
     const startPad =
       resolvedPadStack.copperPads.find(
         (pad) => pad.layer === resolvedPadStack.startLayer,
@@ -891,6 +1004,8 @@ const addRouteSectionGeometry = ({
 const addTextSectionGeometry = (
   section: AsciiSectionLines,
   texts: PadsGeometryText[],
+  layers: PadsGeometryLayerInfo[],
+  layerCount: number,
 ): void => {
   for (let lineIndex = 0; lineIndex < section.lines.length; lineIndex++) {
     const lineTokens = tokenizeLine(section.lines[lineIndex] ?? "")
@@ -914,6 +1029,41 @@ const addTextSectionGeometry = (
     const content = section.lines[lineIndex + 2]?.trim()
     if (!content || content.startsWith("*")) continue
 
+    const layerInfo = layers.find(({ number }) => number === Math.trunc(layer))
+    const side =
+      layerInfo?.side === "top" || layerInfo?.side === "bottom"
+        ? layerInfo.side
+        : lineTokens[6] === "M"
+          ? "bottom"
+          : "top"
+    const gerberLayer =
+      layerInfo?.role === "silkscreen"
+        ? side === "bottom"
+          ? "B_Silkscreen"
+          : "F_Silkscreen"
+        : layerInfo?.role === "assembly"
+          ? side === "bottom"
+            ? "B_Fab"
+            : "F_Fab"
+          : layerInfo?.role === "solder-mask"
+            ? side === "bottom"
+              ? "B_Mask"
+              : "F_Mask"
+            : layerInfo?.role === "paste-mask"
+              ? side === "bottom"
+                ? "B_Paste"
+                : "F_Paste"
+              : layerInfo?.role === "drill"
+                ? "Drill_Drawing"
+                : layerInfo?.role === "mechanical" ||
+                    layerInfo?.role === "unassigned"
+                  ? "Dwgs_User"
+                  : layer <= 1
+                    ? "F_Cu"
+                    : layer >= layerCount
+                      ? "B_Cu"
+                      : `In${Math.trunc(layer) - 1}_Cu`
+
     texts.push({
       source: section.records[lineIndex]?.provenance,
       content,
@@ -923,6 +1073,7 @@ const addTextSectionGeometry = (
       rotation,
       mirrored: lineTokens[6] === "M",
       layer,
+      gerberLayer,
     })
     lineIndex += 2
   }
@@ -950,6 +1101,11 @@ interface AsciiPartDecalPadLayer {
   slotLength: number
   slotOffset: number
   hasUnsupportedTrailingGeometry: boolean
+  thermal?: {
+    outerDiameter: number
+    spokeWidth: number
+    spokeCount: number
+  }
 }
 
 interface AsciiPartDecalPadStack {
@@ -964,6 +1120,7 @@ interface AsciiPartDecalDefinition {
   padStacks: Map<string, AsciiPartDecalPadStack>
   paths: PadsGeometryPath[]
   circles: PadsGeometryCircle[]
+  texts: AsciiPartDecalTextTemplate[]
 }
 
 const isPartDecalHeader = (lineTokens: string[]): boolean =>
@@ -1028,7 +1185,9 @@ const parsePartDecalPadLayer = ({
   }
 
   const fingerShape = shapeCode === "RF" || shapeCode === "OF"
-  const orientation = fingerShape ? (parseFiniteNumber(lineTokens[3]) ?? 0) : 0
+  const thermalShape = shapeCode === "RT" || shapeCode === "ST"
+  const orientation =
+    fingerShape || thermalShape ? (parseFiniteNumber(lineTokens[3]) ?? 0) : 0
   const length = fingerShape
     ? Math.abs(parseFiniteNumber(lineTokens[4]) ?? size)
     : Math.abs(size)
@@ -1045,8 +1204,8 @@ const parsePartDecalPadLayer = ({
   } else if (shapeCode === "A") {
     // Annular pads carry an inner-diameter field before their drill.
     trailingValueIndex++
-  } else if (shapeCode === "RT" || shapeCode === "ST") {
-    // Thermal orientation, inner diameter, spoke width, and spoke count.
+  } else if (thermalShape) {
+    // Thermal orientation, outer diameter, spoke width, and spoke count.
     trailingValueIndex = 7
   }
 
@@ -1098,6 +1257,18 @@ const parsePartDecalPadLayer = ({
     slotLength,
     slotOffset,
     hasUnsupportedTrailingGeometry,
+    ...(thermalShape
+      ? {
+          thermal: {
+            outerDiameter: Math.abs(parseFiniteNumber(lineTokens[4]) ?? size),
+            spokeWidth: Math.abs(parseFiniteNumber(lineTokens[5]) ?? 0),
+            spokeCount: Math.max(
+              0,
+              Math.trunc(parseFiniteNumber(lineTokens[6]) ?? 0),
+            ),
+          },
+        }
+      : {}),
   }
 }
 
@@ -1115,6 +1286,7 @@ const parsePartDecalDefinitions = ({
   let malformedPieceArcCount = 0
   let allLayerCopperPieceCount = 0
   let malformedTagCount = 0
+  let malformedTextCount = 0
   const versionNumber = Number(/^V(\d+)/u.exec(version)?.[1])
 
   for (const section of sections) {
@@ -1131,6 +1303,7 @@ const parsePartDecalDefinitions = ({
 
     let currentDefinition: AsciiPartDecalDefinition | undefined
     let remainingPieceCount = 0
+    let remainingTextCount = 0
     let tagGroupSequence = 0
     let activeTagGroups: { id: string; pinNumber?: string }[] = []
     let lineIndex = 0
@@ -1149,11 +1322,16 @@ const parsePartDecalDefinitions = ({
             padStacks: new Map(),
             paths: [],
             circles: [],
+            texts: [],
           }
           definitions.set(name, currentDefinition)
           remainingPieceCount = Math.max(
             0,
             Math.trunc(parseFiniteNumber(lineTokens[4]) ?? 0),
+          )
+          remainingTextCount = Math.max(
+            0,
+            Math.trunc(parseFiniteNumber(lineTokens[7]) ?? 0),
           )
         }
         lineIndex++
@@ -1334,6 +1512,29 @@ const parsePartDecalDefinitions = ({
         continue
       }
 
+      if (remainingPieceCount === 0 && remainingTextCount > 0) {
+        if (lineTokens.length === 0 || lineTokens[0]?.startsWith("*REMARK")) {
+          lineIndex++
+          continue
+        }
+        const hasFontLine = versionHasFontLines(version)
+        const contentLineIndex = lineIndex + (hasFontLine ? 2 : 1)
+        const content = section.lines[contentLineIndex]?.trim()
+        const textTemplate =
+          content === undefined
+            ? undefined
+            : parseAsciiPartDecalTextTemplate({
+                lineTokens,
+                content,
+                source,
+              })
+        if (textTemplate) currentDefinition.texts.push(textTemplate)
+        else malformedTextCount++
+        remainingTextCount--
+        lineIndex = contentLineIndex + 1
+        continue
+      }
+
       const terminalMatch = /^T([+-]?(?:\d+(?:\.\d*)?|\.\d+))$/u.exec(
         lineTokens[0] ?? "",
       )
@@ -1415,6 +1616,11 @@ const parsePartDecalDefinitions = ({
       `${malformedTagCount} ASCII part-decal tag records have unmatched group boundaries`,
     )
   }
+  if (malformedTextCount > 0) {
+    diagnostics.push(
+      `${malformedTextCount} ASCII part-decal static text records could not be decoded`,
+    )
+  }
   return definitions
 }
 
@@ -1471,14 +1677,64 @@ const resolvePlacementDecalName = ({
   return alternatives[selectedIndex] ?? alternatives[0] ?? partTypeToken
 }
 
+function normalizeRotation(rotation: number): number {
+  const normalizedRotation = rotation % 360
+  return normalizedRotation < 0 ? normalizedRotation + 360 : normalizedRotation
+}
+
+function transformDecalPoint({
+  point,
+  placement,
+}: {
+  point: PadsGeometryPoint
+  placement: PadsGeometryPlacement
+}): PadsGeometryPoint {
+  const mirroredX = placement.bottomLayer ? -point.x : point.x
+  const rotationRadians = (placement.rotation * Math.PI) / 180
+  return {
+    x:
+      placement.location.x +
+      mirroredX * Math.cos(rotationRadians) -
+      point.y * Math.sin(rotationRadians),
+    y:
+      placement.location.y +
+      mirroredX * Math.sin(rotationRadians) +
+      point.y * Math.cos(rotationRadians),
+  }
+}
+
+const getComponentLabelRole = (
+  labelName: string,
+): "reference" | "value" | undefined => {
+  const normalizedName = labelName.trim().toUpperCase()
+  if (normalizedName === "REF.DES.") return "reference"
+  if (normalizedName === "PART TYPE" || normalizedName === "VALUE") {
+    return "value"
+  }
+  return undefined
+}
+
+const versionHasFontLines = (version: string): boolean => {
+  const majorVersion = Number(/^V?(\d+)/u.exec(version)?.[1])
+  return (
+    Number.isFinite(majorVersion) && (majorVersion === 0 || majorVersion >= 9)
+  )
+}
+
 const addPartSectionGeometry = ({
   section,
   decalNamesByPartType,
   placements,
+  texts,
+  layerCount,
+  version,
 }: {
   section: AsciiSectionLines
   decalNamesByPartType: Map<string, string[]>
   placements: PadsGeometryPlacement[]
+  texts: PadsGeometryText[]
+  layerCount: number
+  version: string
 }): void => {
   for (let lineIndex = 0; lineIndex < section.lines.length; lineIndex++) {
     const lineText = section.lines[lineIndex] ?? ""
@@ -1500,9 +1756,10 @@ const addPartSectionGeometry = ({
       continue
     }
 
-    placements.push({
+    const placement: PadsGeometryPlacement = {
       source: section.records[lineIndex]?.provenance,
       reference: lineTokens[0],
+      partTypeName: lineTokens[1],
       footprintName: resolvePlacementDecalName({
         partTypeToken: lineTokens[1],
         alternateIndex: parseFiniteNumber(lineTokens[7]),
@@ -1511,33 +1768,87 @@ const addPartSectionGeometry = ({
       location: { x, y },
       rotation,
       bottomLayer: lineTokens[6] === "M",
-    })
-  }
-}
+    }
+    placements.push(placement)
 
-const normalizeRotation = (rotation: number): number => {
-  const normalizedRotation = rotation % 360
-  return normalizedRotation < 0 ? normalizedRotation + 360 : normalizedRotation
-}
-
-const transformDecalPoint = ({
-  point,
-  placement,
-}: {
-  point: PadsGeometryPoint
-  placement: PadsGeometryPlacement
-}): PadsGeometryPoint => {
-  const mirroredX = placement.bottomLayer ? -point.x : point.x
-  const rotationRadians = (placement.rotation * Math.PI) / 180
-  return {
-    x:
-      placement.location.x +
-      mirroredX * Math.cos(rotationRadians) -
-      point.y * Math.sin(rotationRadians),
-    y:
-      placement.location.y +
-      mirroredX * Math.sin(rotationRadians) +
-      point.y * Math.cos(rotationRadians),
+    const labelCount = Math.max(
+      0,
+      Math.trunc(parseFiniteNumber(lineTokens[11]) ?? 0),
+    )
+    let labelLineIndex = lineIndex + 1
+    if (section.lines[labelLineIndex]?.trim().startsWith(".REUSE.") === true) {
+      labelLineIndex++
+    }
+    for (let labelIndex = 0; labelIndex < labelCount; labelIndex++) {
+      const labelTokens = tokenizeLine(section.lines[labelLineIndex] ?? "")
+      const labelX = parseFiniteNumber(labelTokens[1])
+      const labelY = parseFiniteNumber(labelTokens[2])
+      const labelRotation = parseFiniteNumber(labelTokens[3])
+      const labelHeight = parseFiniteNumber(labelTokens[5])
+      const labelStrokeWidth = parseFiniteNumber(labelTokens[6])
+      const hasFontLine = versionHasFontLines(version)
+      const roleLineIndex = labelLineIndex + (hasFontLine ? 2 : 1)
+      const role = getComponentLabelRole(
+        section.lines[roleLineIndex]?.trim() ?? "",
+      )
+      const visible = [
+        "VALUE",
+        "FULL_NAME",
+        "NAME",
+        "FULL_BOTH",
+        "BOTH",
+      ].includes(labelTokens[0] ?? "")
+      const content =
+        role === "reference"
+          ? placement.reference
+          : role === "value"
+            ? placement.partTypeName
+            : undefined
+      if (
+        visible &&
+        role &&
+        content &&
+        labelX !== undefined &&
+        labelY !== undefined &&
+        labelRotation !== undefined &&
+        labelHeight !== undefined &&
+        labelStrokeWidth !== undefined
+      ) {
+        const localRotation = placement.bottomLayer
+          ? 180 - labelRotation
+          : labelRotation
+        texts.push({
+          source: section.records[labelLineIndex]?.provenance,
+          content,
+          location: transformDecalPoint({
+            point: { x: labelX, y: labelY },
+            placement,
+          }),
+          height: Math.abs(labelHeight),
+          strokeWidth: Math.abs(labelStrokeWidth),
+          rotation: normalizeRotation(placement.rotation + localRotation),
+          mirrored: placement.bottomLayer !== (labelTokens[7] === "M"),
+          horizontalAlignment:
+            labelTokens[8] === "LEFT"
+              ? "left"
+              : labelTokens[8] === "RIGHT"
+                ? "right"
+                : "center",
+          verticalAlignment:
+            labelTokens[9] === "UP"
+              ? "bottom"
+              : labelTokens[9] === "DOWN"
+                ? "top"
+                : "center",
+          reference: placement.reference,
+          role,
+          layer: placement.bottomLayer ? layerCount : 1,
+          gerberLayer: placement.bottomLayer ? "B_Silkscreen" : "F_Silkscreen",
+        })
+      }
+      lineIndex = roleLineIndex
+      labelLineIndex = roleLineIndex + 1
+    }
   }
 }
 
@@ -1647,6 +1958,7 @@ const addPlacedPartGraphics = ({
   layerCount,
   paths,
   circles,
+  texts,
 }: {
   placements: PadsGeometryPlacement[]
   definitions: Map<string, AsciiPartDecalDefinition>
@@ -1654,6 +1966,7 @@ const addPlacedPartGraphics = ({
   layerCount: number
   paths: PadsGeometryPath[]
   circles: PadsGeometryCircle[]
+  texts: PadsGeometryText[]
 }): void => {
   for (const placement of placements) {
     const decalName = placement.footprintName
@@ -1715,22 +2028,78 @@ const addPlacedPartGraphics = ({
           : {}),
       })
     }
+
+    for (const textTemplate of definition.texts) {
+      const localRotation = placement.bottomLayer
+        ? 180 - textTemplate.rotation
+        : textTemplate.rotation
+      texts.push({
+        source: textTemplate.source,
+        content: textTemplate.content,
+        location: transformDecalPoint({
+          point: textTemplate.location,
+          placement,
+        }),
+        height: textTemplate.height,
+        strokeWidth: textTemplate.strokeWidth,
+        rotation: normalizeRotation(placement.rotation + localRotation),
+        mirrored: placement.bottomLayer !== textTemplate.mirrored,
+        horizontalAlignment: textTemplate.horizontalAlignment,
+        verticalAlignment: textTemplate.verticalAlignment,
+        reference: placement.reference,
+        layer: textTemplate.layer,
+        gerberLayer: getPhysicalDecalGerberLayer({
+          sourceLayer: textTemplate.layer,
+          pieceKind: "drawing",
+          placement,
+          layers,
+          layerCount,
+        }),
+      })
+    }
   }
+}
+
+const getPlacedPadPhysicalLayers = ({
+  sourceLevel,
+  bottomLayer,
+  layerCount,
+}: {
+  sourceLevel: number
+  bottomLayer: boolean
+  layerCount: number
+}): number[] => {
+  if (sourceLevel === -2) return [bottomLayer ? layerCount : 1]
+  if (sourceLevel === 0) return [bottomLayer ? 1 : layerCount]
+  if (sourceLevel === -1) {
+    return Array.from(
+      { length: Math.max(0, layerCount - 2) },
+      (_, index) => index + 2,
+    )
+  }
+  if (sourceLevel < 1 || sourceLevel > layerCount) return []
+  return [bottomLayer ? layerCount + 1 - sourceLevel : sourceLevel]
 }
 
 const addPlacedPartPads = ({
   placements,
   definitions,
+  netNameByTerminal,
   layerCount,
   pads,
   holes,
+  thermalReliefs,
+  antipads,
   diagnostics,
 }: {
   placements: PadsGeometryPlacement[]
   definitions: Map<string, AsciiPartDecalDefinition>
+  netNameByTerminal: Map<string, string>
   layerCount: number
   pads: PadsGeometryPad[]
   holes: PadsGeometryHole[]
+  thermalReliefs: PadsGeometryThermalRelief[]
+  antipads: PadsGeometryAntipad[]
   diagnostics: string[]
 }): void => {
   let unresolvedDecalCount = 0
@@ -1753,6 +2122,61 @@ const addPlacedPartPads = ({
       if (!padStack) {
         missingPadStackCount++
         continue
+      }
+      const terminalCenter = transformDecalPoint({
+        point: terminal.location,
+        placement,
+      })
+      const netName = netNameByTerminal.get(
+        `${placement.reference}\0${terminal.pinNumber}`,
+      )
+      for (const reliefLayer of padStack.layers) {
+        const physicalLayers = getPlacedPadPhysicalLayers({
+          sourceLevel: reliefLayer.sourceLevel,
+          bottomLayer: placement.bottomLayer,
+          layerCount,
+        })
+        if (reliefLayer.thermal) {
+          const shape = reliefLayer.shapeCode === "RT" ? "circle" : "square"
+          const localRotation = placement.bottomLayer
+            ? 180 - reliefLayer.orientation
+            : reliefLayer.orientation
+          for (const layer of physicalLayers) {
+            thermalReliefs.push({
+              source: reliefLayer.source ?? terminal.source,
+              center: terminalCenter,
+              layer,
+              shape,
+              rotation: normalizeRotation(placement.rotation + localRotation),
+              innerDiameter: reliefLayer.size,
+              outerDiameter: reliefLayer.thermal.outerDiameter,
+              spokeWidth: reliefLayer.thermal.spokeWidth,
+              spokeCount: reliefLayer.thermal.spokeCount,
+              reference: placement.reference,
+              pinNumber: terminal.pinNumber,
+              decalName,
+              netName,
+            })
+          }
+        } else if (
+          reliefLayer.shapeCode === "RA" ||
+          reliefLayer.shapeCode === "SA"
+        ) {
+          const shape = reliefLayer.shapeCode === "RA" ? "circle" : "square"
+          for (const layer of physicalLayers) {
+            antipads.push({
+              source: reliefLayer.source ?? terminal.source,
+              center: terminalCenter,
+              layer,
+              shape,
+              diameter: reliefLayer.size,
+              reference: placement.reference,
+              pinNumber: terminal.pinNumber,
+              decalName,
+              netName,
+            })
+          }
+        }
       }
       const padLayer =
         padStack.layers.find(
@@ -1798,6 +2222,7 @@ const addPlacedPartPads = ({
           reference: placement.reference,
           pinNumber: terminal.pinNumber,
           decalName,
+          netName,
         })
       }
       if (padLayer.size <= 0) continue
@@ -1848,6 +2273,7 @@ const addPlacedPartPads = ({
         reference: placement.reference,
         pinNumber: terminal.pinNumber,
         decalName,
+        netName,
       })
     }
   }
@@ -1867,6 +2293,58 @@ const addPlacedPartPads = ({
       `${unsupportedPadCount} ASCII placed pads use drilled, rounded, or unsupported pad geometry`,
     )
   }
+}
+
+const getNetNamesByTerminal = ({
+  sections,
+  placements,
+  diagnostics,
+}: {
+  sections: AsciiSectionLines[]
+  placements: PadsGeometryPlacement[]
+  diagnostics: string[]
+}): Map<string, string> => {
+  const references = new Set(placements.map(({ reference }) => reference))
+  const netNameByTerminal = new Map<string, string>()
+  let conflictingTerminalCount = 0
+
+  for (const section of sections) {
+    if (section.name !== "NET" && section.name !== "ROUTE") continue
+    let netName: string | undefined
+    for (const lineText of section.lines) {
+      const signalMatch = /^\*SIGNAL\*\s*(\S*)/u.exec(lineText.trim())
+      if (signalMatch) {
+        netName = signalMatch[1] || undefined
+        continue
+      }
+      if (!netName || lineText.trimStart().startsWith("*")) continue
+
+      for (const token of tokenizeLine(lineText)) {
+        const separatorIndex = token.lastIndexOf(".")
+        if (separatorIndex <= 0 || separatorIndex >= token.length - 1) {
+          continue
+        }
+        const reference = token.slice(0, separatorIndex)
+        const pinNumber = token.slice(separatorIndex + 1)
+        if (!references.has(reference)) continue
+
+        const terminalKey = `${reference}\0${pinNumber}`
+        const existingNetName = netNameByTerminal.get(terminalKey)
+        if (existingNetName && existingNetName !== netName) {
+          conflictingTerminalCount++
+          continue
+        }
+        netNameByTerminal.set(terminalKey, netName)
+      }
+    }
+  }
+
+  if (conflictingTerminalCount > 0) {
+    diagnostics.push(
+      `${conflictingTerminalCount} ASCII component terminals are assigned to conflicting nets`,
+    )
+  }
+  return netNameByTerminal
 }
 
 const getLayerRole = ({
@@ -2119,6 +2597,8 @@ export const extractAsciiBoardGeometry = (
   const placements: PadsGeometryPlacement[] = []
   const pads: PadsGeometryPad[] = []
   const holes: PadsGeometryHole[] = []
+  const thermalReliefs: PadsGeometryThermalRelief[] = []
+  const antipads: PadsGeometryAntipad[] = []
   const unverifiedViaLocations: PadsGeometryPoint[] = []
 
   for (const section of sections) {
@@ -2131,25 +2611,38 @@ export const extractAsciiBoardGeometry = (
         viaDefinitions,
         paths,
         circles,
+        thermalReliefs,
+        antipads,
         unverifiedViaLocations,
         diagnostics,
       })
     } else if (section.name === "TEXT") {
-      addTextSectionGeometry(section, texts)
+      addTextSectionGeometry(section, texts, layers, layerCount)
     } else if (section.name === "PART") {
       addPartSectionGeometry({
         section,
         decalNamesByPartType,
         placements,
+        texts,
+        layerCount,
+        version: document.version,
       })
     }
   }
+  const netNameByTerminal = getNetNamesByTerminal({
+    sections,
+    placements,
+    diagnostics,
+  })
   addPlacedPartPads({
     placements,
     definitions: partDecalDefinitions,
+    netNameByTerminal,
     layerCount,
     pads,
     holes,
+    thermalReliefs,
+    antipads,
     diagnostics,
   })
   addPlacedPartGraphics({
@@ -2159,12 +2652,14 @@ export const extractAsciiBoardGeometry = (
     layerCount,
     paths,
     circles,
+    texts,
   })
 
   return normalizeGeometryUnits({
     sourceUnits: document.units,
     geometry: {
       sourceFormat: "ascii",
+      documentSource: getPadsDocumentSourceProvenance(document),
       version: document.version,
       sourceUnits: document.units,
       coordinateUnit: "nanometer",
@@ -2176,6 +2671,8 @@ export const extractAsciiBoardGeometry = (
       placements,
       pads,
       holes,
+      thermalReliefs,
+      antipads,
       unassignedVertices: [],
       unverifiedConnections: [],
       unverifiedViaLocations,

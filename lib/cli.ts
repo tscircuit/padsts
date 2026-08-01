@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { readFile, writeFile } from "node:fs/promises"
-import { convertPadsToCircuitJson } from "./circuit-json"
 import { createPadsConversionReport, validatePads } from "./conversion-report"
 import { inspectPads, type PadsInspection } from "./inspection"
 import { type GeneratePadsSvgOptions, generateSvgFromPads } from "./svg"
@@ -24,7 +23,6 @@ const usage = `Usage:
   padsts inspect <file> [--json]
   padsts validate <file> [--strict] [--json]
   padsts to-svg <file> [-o <output.svg>] [--layers <a,b>] [--viewbox <x,y,w,h>] [--viewbox-source-units] [--debug]
-  padsts to-circuit-json <file> [-o <output.json>] [--strict]
   padsts report <file> [--strict]
 `
 
@@ -155,20 +153,6 @@ export const runPadsCli = async (
         io.stdout(svg)
       }
       return 0
-    }
-
-    if (command === "to-circuit-json") {
-      const result = convertPadsToCircuitJson(sourceBytes, {
-        strict: commandArgs.includes("--strict"),
-      })
-      const serializedCircuitJson = `${JSON.stringify(result.circuitJson, null, 2)}\n`
-      const outputPath = getOption(commandArgs, "-o")
-      if (outputPath) {
-        await io.writeFile(outputPath, serializedCircuitJson)
-      } else {
-        io.stdout(serializedCircuitJson)
-      }
-      return result.report.strict && !result.report.lossless ? 1 : 0
     }
 
     if (command === "report") {

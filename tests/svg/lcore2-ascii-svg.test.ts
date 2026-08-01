@@ -34,6 +34,13 @@ test.skipIf(!isAvailable)("renders the LCORE 2 ASCII board", async () => {
   expect(
     geometry.layers.find((layer) => layer.name === "Silkscreen Top"),
   ).toMatchObject({ role: "silkscreen", side: "top" })
+  expect(
+    geometry.texts.find(({ content }) => content === "LCORE_2"),
+  ).toMatchObject({
+    gerberLayer: "B_Silkscreen",
+    mirrored: true,
+    rotation: 113,
+  })
   expectGerberStyleSvg(svg)
   expect(svg).toContain('data-kind="outline"')
   expect(svg).toContain('data-kind="placement"')

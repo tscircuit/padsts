@@ -1,3 +1,5 @@
+import type { PadsDocument } from "./parse-pads"
+
 export interface PadsSourceSpan {
   startOffset: number
   endOffset: number
@@ -29,3 +31,36 @@ export const createPadsSourceId = (
   section: string | number,
   record: string | number,
 ): string => `${format}:${section}:${record}`
+
+export const createPadsAsciiDocumentSourceProvenance = (
+  sourceText: string,
+): PadsAsciiSourceProvenance => ({
+  format: "ascii",
+  sourceId: "ascii:document",
+  section: "DOCUMENT",
+  span: {
+    startOffset: 0,
+    endOffset: sourceText.length,
+    startLine: 1,
+    endLine:
+      sourceText.length === 0 ? 1 : sourceText.split(/\r\n|\r|\n/u).length,
+  },
+})
+
+export const getPadsDocumentSourceProvenance = (
+  document: PadsDocument,
+): PadsSourceProvenance => {
+  if (document.kind === "binary") {
+    return {
+      format: "binary",
+      sourceId: "binary:container",
+      sectionIndex: 0,
+      span: {
+        startOffset: 0,
+        endOffset: document.getBytes().byteLength,
+      },
+    }
+  }
+
+  return createPadsAsciiDocumentSourceProvenance(document.getString())
+}

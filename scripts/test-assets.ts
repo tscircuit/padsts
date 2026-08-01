@@ -63,6 +63,16 @@ export const downloadableTestAssets: DownloadableTestAsset[] = [
     licenseUrl: `${KICAD_BLOB_ROOT}/LICENSE`,
   },
   {
+    id: "kicad-claysight-ascii",
+    relativePath: "kicad/claysight.asc",
+    format: "ascii",
+    expectedByteLength: 79_802,
+    gitBlobSha: "7d9c8c1d9ab223b17a37ef6be6e4d484dc0f9448",
+    downloadUrl: `${KICAD_RAW_ROOT}/${PADS_FIXTURE_PATH}/ClaySight_MK1/ClaySight_MK1.asc`,
+    sourceUrl: `${KICAD_BLOB_ROOT}/${PADS_FIXTURE_PATH}/ClaySight_MK1/ClaySight_MK1.asc`,
+    licenseUrl: `${KICAD_BLOB_ROOT}/LICENSE`,
+  },
+  {
     id: "kicad-synthetic-noncopper-track-ascii",
     relativePath: "kicad/synthetic-noncopper-track.asc",
     format: "ascii",

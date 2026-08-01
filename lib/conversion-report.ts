@@ -1,7 +1,8 @@
 import type { PadsDiagnostic } from "./diagnostics"
 import type { PadsInspection, PadsInspectionCoverage } from "./inspection"
 import { inspectPads } from "./inspection"
-import type { PadsDocument } from "./parse-pads"
+import { type PadsDocument, parsePads } from "./parse-pads"
+import { getPadsDocumentSourceProvenance } from "./source-provenance"
 
 export interface PadsConversionReport {
   schemaVersion: "1"
@@ -31,7 +32,11 @@ export const createPadsConversionReport = (
   source: string | Uint8Array | PadsDocument,
   { strict = false }: { strict?: boolean } = {},
 ): PadsConversionReport => {
-  const inspection = inspectPads(source)
+  const document =
+    typeof source === "string" || source instanceof Uint8Array
+      ? parsePads(source)
+      : source
+  const inspection = inspectPads(document)
   const coverageLoss =
     inspection.coverage.entitiesWithoutProvenance > 0 ||
     inspection.coverage.skippedSourceRecords > 0 ||
@@ -47,6 +52,7 @@ export const createPadsConversionReport = (
       category: "coverage",
       message:
         "Strict conversion refused input with unsupported, malformed, inferred, approximate, opaque, or unaccounted source data",
+      source: getPadsDocumentSourceProvenance(document),
       details: {
         entitiesWithoutProvenance:
           inspection.coverage.entitiesWithoutProvenance,

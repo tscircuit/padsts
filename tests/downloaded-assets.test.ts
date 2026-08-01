@@ -47,6 +47,48 @@ describe("downloaded PADS fixtures", () => {
         if (expected) {
           const geometry = extractPadsBoardGeometry(document)
           const inspection = inspectPads(document)
+          const { representative, ...expectedSummary } = expected
+          if (representative.kind === "placement") {
+            const placement = geometry.placements.find(
+              ({ reference }) => reference === representative.reference,
+            )
+            expect(placement?.location).toMatchObject({
+              x: representative.x,
+              y: representative.y,
+            })
+          } else if (representative.kind === "path") {
+            const path = geometry.paths.find(
+              ({ kind, name, netName }) =>
+                kind === representative.pathKind &&
+                name === representative.name &&
+                netName === representative.netName,
+            )
+            expect(path?.points[representative.pointIndex]).toMatchObject({
+              x: representative.x,
+              y: representative.y,
+            })
+          } else {
+            const vertex = geometry.unassignedVertices.find(
+              ({ id }) => id === representative.id,
+            )
+            expect(vertex).toMatchObject({
+              x: representative.x,
+              y: representative.y,
+            })
+          }
+          const diagnosticCodes = Object.fromEntries(
+            [...new Set(inspection.diagnostics.map(({ code }) => code))].map(
+              (code) => [
+                code,
+                inspection.diagnostics.filter(
+                  (diagnostic) => diagnostic.code === code,
+                ).length,
+              ],
+            ),
+          )
+          expect(
+            inspection.diagnostics.every(({ source }) => source !== undefined),
+          ).toBe(true)
           const actualBounds = inspection.bounds
             ? [
                 inspection.bounds.minimumX,
@@ -76,8 +118,11 @@ describe("downloaded PADS fixtures", () => {
               outlines: geometry.paths.filter(({ kind }) => kind === "outline")
                 .length,
               pours: 0,
+              thermalReliefs: geometry.thermalReliefs.length,
+              antipads: geometry.antipads.length,
             },
             diagnosticCount: inspection.diagnostics.length,
+            diagnosticCodes,
             coverage: {
               sourceRecords: inspection.coverage.sourceRecordCount,
               partiallyDecodedRecords:
@@ -88,7 +133,7 @@ describe("downloaded PADS fixtures", () => {
                 inspection.coverage.partiallyDecodedBinaryBytes,
               opaqueBytes: inspection.coverage.opaqueBinaryBytes,
             },
-          }).toEqual(expected)
+          }).toEqual(expectedSummary)
         }
 
         if (asset.format === "binary" && document.kind === "binary") {

@@ -13,7 +13,8 @@ Versioning once a public API is declared stable.
   conversion reports, and the `padsts` CLI.
 - Add source-linked SVG IDs, normalized/source-unit board-coordinate zooms,
   compound copper polarity masks, and expanded visual snapshots.
-- Add experimental Circuit JSON conversion for exactly representable geometry.
+- Move experimental Circuit JSON conversion into the dedicated
+  `pads-to-circuit-json` adapter package.
 
 ## 0.0.1
 

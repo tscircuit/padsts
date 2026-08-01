@@ -26,6 +26,15 @@ test("renders transformed top and bottom part-decal pads", async () => {
     "square",
     "square",
   ])
+  expect(
+    geometry.pads
+      .filter(({ netName }) => netName)
+      .map(
+        ({ reference, pinNumber, netName }) =>
+          `${reference}.${pinNumber}:${netName}`,
+      )
+      .sort(),
+  ).toEqual(["U1.1:GND", "U1.2:DATA", "U2.1:GND", "U2.2:DATA"])
   expect(geometry.diagnostics).toEqual([])
 
   const views = [

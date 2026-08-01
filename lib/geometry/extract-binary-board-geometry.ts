@@ -5,6 +5,7 @@ import type {
 } from "../binary"
 import { BinarySectionReader } from "../binary"
 import type { PadsBinarySourceProvenance } from "../source-provenance"
+import { getPadsDocumentSourceProvenance } from "../source-provenance"
 import { normalizeGeometryUnits } from "./normalize-geometry-units"
 import type {
   PadsBinarySectionSummary,
@@ -557,6 +558,7 @@ export const extractBinaryBoardGeometry = (
     sourceUnits: "BASIC",
     geometry: {
       sourceFormat: "binary",
+      documentSource: getPadsDocumentSourceProvenance(document),
       version: `0x${document.version.toString(16)}`,
       sourceUnits: "BASIC",
       coordinateUnit: "nanometer",
@@ -568,6 +570,8 @@ export const extractBinaryBoardGeometry = (
       placements,
       pads: [],
       holes: [],
+      thermalReliefs: [],
+      antipads: [],
       unassignedVertices: vertices,
       unverifiedConnections,
       unverifiedViaLocations,

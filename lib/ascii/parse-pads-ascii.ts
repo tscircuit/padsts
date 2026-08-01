@@ -1,5 +1,6 @@
 import type { PadsDiagnostic } from "../diagnostics"
 import { PadsParseError } from "../parse-error"
+import { createPadsAsciiDocumentSourceProvenance } from "../source-provenance"
 import { PadsAsciiDocument, type PadsAsciiUnits } from "./pads-ascii-document"
 import { createPadsAsciiRecord } from "./pads-ascii-record"
 import {
@@ -66,9 +67,10 @@ const readLineSpans = (sourceText: string): LineSpan[] => {
 const parseVersionHeader = (
   sectionName: string,
 ): { version: string; units: PadsAsciiUnits } | undefined => {
-  const match = /^PADS-POWERPCB-(.+)-(BASIC|MILS|INCHES|METRIC)$/u.exec(
-    sectionName,
-  )
+  const match =
+    /^PADS-POWERPCB-(.+)-(BASIC|MILS|INCHES|METRIC)(?:-[^!]+)?$/u.exec(
+      sectionName,
+    )
   if (!match) return undefined
 
   return {
@@ -164,6 +166,7 @@ export const parsePadsAscii = (sourceText: string): PadsAsciiDocument => {
   }
 
   const diagnostics: PadsDiagnostic[] = []
+  const documentSource = createPadsAsciiDocumentSourceProvenance(sourceText)
   const endSectionIndices = sections.flatMap((section, index) =>
     section.name === "END" ? [index] : [],
   )
@@ -173,6 +176,7 @@ export const parsePadsAscii = (sourceText: string): PadsAsciiDocument => {
       severity: "warning",
       category: "validation",
       message: "PADS ASCII document does not contain an *END* terminator",
+      source: documentSource,
     })
   } else if (
     endSectionIndices.length !== 1 ||
@@ -183,6 +187,7 @@ export const parsePadsAscii = (sourceText: string): PadsAsciiDocument => {
       severity: "warning",
       category: "validation",
       message: "PADS ASCII *END* terminator is duplicated or is not last",
+      source: documentSource,
     })
   }
 

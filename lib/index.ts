@@ -1,6 +1,5 @@
 export * from "./ascii"
 export * from "./binary"
-export * from "./circuit-json"
 export * from "./conversion-report"
 export * from "./diagnostics"
 export * from "./geometry"

@@ -5,18 +5,20 @@
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "types": "lib/index.ts",
   "bin": {
     "padsts": "dist/cli.js"
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./lib/index.ts",
+      "bun": "./lib/index.ts",
       "import": "./dist/index.js"
     }
   },
   "files": [
     "dist",
+    "lib",
     "LICENSE",
     "README.md"
   ],
@@ -49,6 +51,7 @@
     "@biomejs/biome": "^2.2.4",
     "@types/bun": "latest",
     "bun-match-svg": "^0.0.15",
+    "format-si-unit": "0.0.7",
     "sharp": "0.35.3",
     "tsup": "^8.5.0",
     "typescript": "^5"

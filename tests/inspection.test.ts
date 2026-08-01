@@ -58,6 +58,9 @@ describe("PADS inspection and conversion reports", () => {
         severity: "error",
       }),
     )
+    expect(report.diagnostics.every(({ source }) => source !== undefined)).toBe(
+      true,
+    )
     expect(validation).toMatchObject({ valid: false, exitCode: 1 })
   })
 })

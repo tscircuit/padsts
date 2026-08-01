@@ -11,6 +11,7 @@ import {
   type PadsGeometryPoint,
 } from "./geometry"
 import { type PadsDocument, parsePads } from "./parse-pads"
+import { getPadsDocumentSourceProvenance } from "./source-provenance"
 import { convertPadsCoordinateToNanometers } from "./units"
 
 export interface PadsInspectionEntityCounts {
@@ -20,6 +21,8 @@ export interface PadsInspectionEntityCounts {
   placements: number
   pads: number
   holes: number
+  thermalReliefs: number
+  antipads: number
   unresolvedVertices: number
   unverifiedConnections: number
   unverifiedViaLocations: number
@@ -82,6 +85,8 @@ const getPoints = (geometry: PadsBoardGeometry): PadsGeometryPoint[] => [
   ...geometry.placements.map((placement) => placement.location),
   ...geometry.pads.map((pad) => pad.center),
   ...geometry.holes.map((hole) => hole.center),
+  ...geometry.thermalReliefs.map((thermal) => thermal.center),
+  ...geometry.antipads.map((antipad) => antipad.center),
 ]
 
 const getBounds = (
@@ -190,6 +195,8 @@ const getAsciiCoverage = (
       ...geometry.placements,
       ...geometry.pads,
       ...geometry.holes,
+      ...geometry.thermalReliefs,
+      ...geometry.antipads,
     ]
       .map((entity) => entity.source?.sourceId)
       .filter((sourceId): sourceId is string => sourceId !== undefined),
@@ -261,13 +268,18 @@ export const inspectPads = (
     document.kind === "binary"
       ? sections.reduce((total, section) => total + section.byteLength, 0)
       : 0
+  const documentSource = getPadsDocumentSourceProvenance(document)
   const diagnostics = [
     ...getDocumentDiagnostics(document),
     ...(geometry.issues ?? []),
-  ]
+  ].map((diagnostic) =>
+    diagnostic.source ? diagnostic : { ...diagnostic, source: documentSource },
+  )
   if (document.kind === "binary") {
     for (const section of sections) {
       if (section.status === "opaque") {
+        const sectionIndex = Number(section.id.split(":")[1])
+        const binarySection = document.getSection(sectionIndex)
         diagnostics.push({
           code: "binary-unsupported-section",
           severity: "warning",
@@ -276,8 +288,13 @@ export const inspectPads = (
           source: {
             format: "binary",
             sourceId: section.id,
-            sectionIndex: Number(section.id.split(":")[1]),
-            span: { startOffset: 0, endOffset: section.byteLength },
+            sectionIndex,
+            span: {
+              startOffset: binarySection?.directoryEntry.sectionOffset ?? 0,
+              endOffset:
+                (binarySection?.directoryEntry.sectionOffset ?? 0) +
+                section.byteLength,
+            },
           },
         })
       }
@@ -317,6 +334,8 @@ export const inspectPads = (
       placements: geometry.placements.length,
       pads: geometry.pads.length,
       holes: geometry.holes.length,
+      thermalReliefs: geometry.thermalReliefs.length,
+      antipads: geometry.antipads.length,
       unresolvedVertices: geometry.unassignedVertices.length,
       unverifiedConnections: geometry.unverifiedConnections.length,
       unverifiedViaLocations: geometry.unverifiedViaLocations.length,

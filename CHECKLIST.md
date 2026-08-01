@@ -38,12 +38,12 @@ The central completion rule is:
   - [ ] Recalculate binary directory lengths, record counts, offsets, footer
     size, and checks when a binary document changes.
   - [ ] Add parse → edit → serialize → parse tests for every mutable entity.
-- [ ] Add a shared source-provenance model.
+- [x] Add a shared source-provenance model.
   - [x] Give every decoded ASCII record a section, line, and byte span.
   - [x] Give every decoded binary record a section, record index, and byte
     range.
   - [x] Preserve stable source IDs through normalized geometry and conversion.
-  - [ ] Include source provenance in all warnings and conversion diagnostics.
+  - [x] Include source provenance in all warnings and conversion diagnostics.
 
 ### Units and coordinates
 
@@ -91,8 +91,12 @@ with a typed ASCII AST.
   `ROUTE`, `VIA`, `NET`, `LAYER`, and `TESTPOINT`.
 - [x] Preserve unknown top-level and nested records without accidentally
   splitting their parent sections.
-- [ ] Implement quoted strings, embedded spaces, escaped text, blank fields,
-  continuation records, comments, and version-specific field counts.
+- [ ] Implement complete record tokenization and dialect validation.
+  - [x] Preserve and decode quoted strings, embedded spaces, escaped text,
+    empty quoted fields, and `#`, `;`, and `//` comment records.
+  - [ ] Decode section-specific continuation records.
+  - [ ] Validate version-specific field counts without rejecting preserved
+    future fields.
 - [x] Give each parsed line a typed record kind or an explicit unknown-record
   node.
 - [x] Validate required section ordering and the `*END*` terminator without
@@ -127,18 +131,24 @@ with a typed ASCII AST.
   `PLACEMENT_KEEPOUT` line objects as keepout geometry.
 - [x] Extract basic free-text position, rotation, layer, height, stroke width,
   and mirror flag.
+- [x] Normalize ASCII free text onto physical Gerber-style layers and honor
+  those layers in composite and filtered SVG views.
 - [ ] Parse every line-piece kind into typed geometry.
   - [x] Open and closed polylines.
   - [x] Circles.
   - [x] Arc-annotated `LINES` vertices with exact center, radius, direction, and
     sweep.
   - [ ] Curves or other version-specific primitives.
-  - [ ] Board cutouts and nested contours.
+  - [x] Board cutouts and nested contours, including `BRDCIR` diameter pieces.
   - [x] Copper and keepout contours.
 - [x] Stop rendering arc-annotated `LINES` vertices as straight segments.
 - [ ] Decode line styles, widths, restrictions, ownership, and layer semantics.
-- [ ] Parse text alignment, font, justification, visibility, ownership, and
-  multiline content.
+- [x] Parse placed component reference/value label visibility, alignment,
+  justification, mirroring, rotation, and component ownership.
+- [ ] Parse remaining free/decal text font details, ownership, and multiline
+  content.
+  - [x] Decode single-line static `PARTDECAL` text with component ownership,
+    layer, alignment, rotation, mirroring, height, and stroke width.
 - [ ] Convert text to deterministic stroke geometry when fabrication output
   requires it.
 
@@ -158,9 +168,13 @@ with a typed ASCII AST.
       layer.
     - [ ] Decode annular, finger, rounded, chamfered, and custom shapes.
   - [ ] Thermal, clearance, and antipad definitions.
+    - [x] Decode `RT`/`ST` inner and outer dimensions, spoke orientation,
+      width, and count, including the dimension-first ordering observed in
+      BASIC via exports.
     - [x] Recognize round and square antipads as negative geometry and avoid
       replacing them with a generic positive pad.
-    - [ ] Render antipad voids and thermal spokes.
+    - [x] Render layer-scoped antipad voids, thermal clearances, and exact
+      spoke counts/orientations without erasing the conductive pad flash.
   - [ ] Blind, buried, microvia, and through-via distinctions.
 - [x] Preserve resolved per-layer round and square copper apertures from basic
   conductive `VIA` pad-stack records for visualization.
@@ -192,6 +206,8 @@ with a typed ASCII AST.
       - [x] Decode slotted drill orientation, length, and offset.
       - [x] Decode rounded and chamfered corners for square and
         rectangular-finger pads.
+      - [x] Decode placed round/square thermal relief and antipad records on
+        mounted, opposite, inner, and explicitly numbered physical layers.
       - [ ] Decode annular, thermal, odd, and custom copper shapes.
   - [ ] Pad-stack references.
     - [x] Resolve default pin-0 and pin-specific pad stacks for placed
@@ -206,6 +222,10 @@ with a typed ASCII AST.
     - [x] Preserve nested `TAG` group membership and inherited pin association.
     - [x] Decode polarity-aware `COPCUT`/`COPCCO` cutouts and other piece kinds.
   - [ ] Reference/value text templates.
+    - [x] Decode and instantiate static footprint text independently of the
+      reference/value label records.
+    - [ ] Decode default reference/value label templates and reconcile them
+      with per-instance `PART` label overrides.
   - [ ] Copper, keepout, and placement-outline primitives.
     - [x] Positive copper and keepout primitives.
     - [x] Compound copper cutouts.
@@ -232,8 +252,9 @@ with a typed ASCII AST.
     fabrication, and drawing layers.
   - [x] Render positive decal copper and keepout pieces.
   - [x] Render compound copper cutouts.
-  - [ ] Render decal text and remaining unsupported
-    pad shapes.
+  - [x] Render transformed static decal text.
+  - [ ] Render default decal reference/value templates and remaining
+    unsupported pad shapes.
 
 ### Nets, routes, and test points
 
@@ -243,7 +264,8 @@ with a typed ASCII AST.
 - [x] Require an explicit via name instead of treating thermal flags as vias.
 - [ ] Parse `NET` and nested `SIGNAL` records.
   - [ ] Net names and stable IDs.
-  - [ ] Part/pin membership.
+  - [x] Resolve `reference.pin` membership onto normalized placed pads and
+    plated holes with indexed lookups.
   - [ ] Unconnected pins and no-connect markers.
   - [ ] Net classes and constraints where present.
 - [ ] Parse `ROUTE` records exactly.
@@ -427,7 +449,8 @@ partial and based on a small number of observed record offsets.
 ## P1: normalized board model
 
 - [x] Expose a small visualization model containing paths, circles, pads,
-  plated/non-plated holes, text, placements, layer metadata, and diagnostics.
+  plated/non-plated holes, thermal reliefs, antipads, text, placements, layer
+  metadata, and diagnostics.
 - [ ] Create a conversion-grade board model independent of ASCII/binary layout.
 - [ ] Model the complete layer stack with stable layer IDs and fabrication
   roles.
@@ -461,6 +484,9 @@ partial and based on a small number of observed record offsets.
 - [x] Render explicit drill holes.
 - [x] Clip artwork to a decoded board outline when available.
 - [x] Preserve diagnostics and decoded counts in SVG metadata.
+- [x] Render component reference/value labels with alignment, rotation,
+  mirroring, layer metadata, and optional reference filtering for focused
+  inspection.
 - [x] Keep binary section and unresolved-vertex overlays opt-in.
 - [x] Snapshot every downloaded fixture with
   `toMatchSvgSnapshot(import.meta.path)`.
@@ -474,6 +500,10 @@ partial and based on a small number of observed record offsets.
   - [x] Render positive decal copper and keepout pieces.
   - [x] Render compound decal copper cutouts.
   - [ ] Render decal text.
+    - [x] Render component-owned static footprint text on physical top/bottom
+      layers with placement mirroring and rotation.
+    - [ ] Render default reference/value templates not overridden by a placed
+      `PART` label.
 - [ ] Render verified pad-stack shapes and drill geometry.
   - [x] Render resolved ASCII round and square via apertures with exact drill
     radii and layer-span metadata.
@@ -482,7 +512,8 @@ partial and based on a small number of observed record offsets.
     copper layers.
   - [x] Render component drills in the Excellon-style `Drill` group with
     plating, terminal, decal, component, and layer-span metadata.
-  - [ ] Render antipad and thermal geometry.
+  - [x] Render antipad voids and thermal clearance/spoke geometry with stable
+    entity metadata and layer filtering.
 - [ ] Render correct binary layer assignments.
 - [ ] Render verified board edges and cutouts for every binary version.
 - [ ] Add solder-mask, solder-paste, fabrication, assembly, courtyard, and
@@ -510,10 +541,10 @@ partial and based on a small number of observed record offsets.
   - [x] Debug/coverage view.
   - [x] Arbitrary board-coordinate detail windows for close-up inspection.
 - [x] Use stable, source-linked element IDs and `data-*` attributes.
-- [ ] Add semantic assertions alongside image snapshots.
+- [x] Add semantic assertions alongside image snapshots.
   - [x] Expected layer names and normalized silkscreen/assembly roles for the
     focused decal fixture and real ASCII references.
-  - [ ] Expected entity counts.
+  - [x] Expected entity counts.
     - [x] Assert exact routed-via counts for the LCORE2, Dexter, and EMS4 ASCII
       references.
     - [x] Assert resolved component-pad counts for the LCORE2, Dexter, EMS4,
@@ -522,7 +553,7 @@ partial and based on a small number of observed record offsets.
       LCORE2, Dexter, EMS4, and TMS ASCII references.
     - [x] Assert decoded decal path and circle counts for the LCORE2, Dexter,
       EMS4, and TMS ASCII references.
-  - [ ] Representative coordinates and dimensions.
+  - [x] Representative coordinates and dimensions.
     - [x] Assert representative resolved via sizes, drill sizes, shapes, and
       layer spans.
     - [x] Assert transformed round/slot dimensions, centers, rotations,
@@ -531,7 +562,7 @@ partial and based on a small number of observed record offsets.
       and mirrored sweep direction.
     - [x] Assert representative custom-copper pin association, layer routing,
       exact-arc geometry, polarity, and keepout restriction codes.
-  - [ ] No unexpected decoder diagnostics.
+  - [x] No unexpected decoder diagnostics.
 - [ ] Compare rendered geometry with an independent importer, not only prior
   `padsts` snapshots.
 
@@ -552,22 +583,11 @@ partial and based on a small number of observed record offsets.
 
 ### Circuit JSON
 
-- [x] Implement experimental `toCircuitJson(document)`.
-- [ ] Map board outline and cutouts.
-  - [x] Map exact line-only board outlines.
-  - [ ] Map board cutouts.
-- [ ] Map layer stack.
-- [ ] Map components, footprints, pads, holes, and text.
-  - [x] Map placed components with decoded extents, pads, and holes.
-  - [ ] Map reusable footprints and text.
-- [ ] Map nets, ports/pins, traces, vias, and connectivity.
-- [ ] Map pours, keepouts, and supported rule data.
-- [x] Preserve PADS source IDs in stable Circuit JSON entity IDs.
-- [ ] Emit warnings for every approximation or skipped entity.
-- [ ] Validate generated Circuit JSON against the current schema.
-- [ ] Render generated Circuit JSON and compare it with the PADS SVG.
-- [ ] Generate Gerber/Excellon files from converted Circuit JSON and compare
-  them with known-good fabrication output.
+- [x] Move Circuit JSON mapping into the separate
+      [`pads-to-circuit-json`](https://github.com/tscircuit/pads-to-circuit-json)
+      package.
+- [x] Keep parser, normalized geometry, provenance, and SVG rendering APIs in
+      `padsts` without target-specific Circuit JSON policy.
 
 ### KiCad and fabrication adapters
 
@@ -591,7 +611,7 @@ partial and based on a small number of observed record offsets.
 
 - [x] Pin downloadable fixtures to a source commit.
 - [x] Verify downloaded fixtures with expected byte lengths and Git blob hashes.
-- [x] Cover seven ASCII boards and native binary versions `0x2021`, `0x2025`,
+- [x] Cover eight ASCII boards and native binary versions `0x2021`, `0x2025`,
   `0x2026`, and `0x2027`.
 - [x] Keep same-board ASCII references for the Dexter, EMS4, LCORE2, and TMS
   native binary fixtures.
@@ -602,11 +622,11 @@ partial and based on a small number of observed record offsets.
   snapshots for the real ASCII reference boards.
 - [x] Require each new geometry-decoder increment to add or update focused
   close-up snapshots that expose the affected features at inspectable scale.
-- [ ] Add a typed expected-results manifest for every fixture.
+- [x] Add a typed expected-results manifest for every fixture.
   - [x] Units and layer count.
   - [x] Board/debug extents when decoded.
   - [x] Component, pad, net, trace, via, text, outline, and decoded-pour counts.
-  - [ ] Representative named entities and coordinates.
+  - [x] Representative named entities and coordinates.
   - [x] Expected diagnostics and decode coverage.
 - [ ] Add small synthetic ASCII fixtures for every record type and edge case.
   - [x] Cover top/interior/bottom via pads, partial spans, and explicit
