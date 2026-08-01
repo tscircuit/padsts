@@ -103,6 +103,18 @@ export const normalizeGeometryUnits = ({
       width: hole.width * scale,
       height: hole.height * scale,
     })),
+    thermalReliefs: geometry.thermalReliefs.map((thermal) => ({
+      ...thermal,
+      center: scalePoint(thermal.center, scale),
+      innerDiameter: thermal.innerDiameter * scale,
+      outerDiameter: thermal.outerDiameter * scale,
+      spokeWidth: thermal.spokeWidth * scale,
+    })),
+    antipads: geometry.antipads.map((antipad) => ({
+      ...antipad,
+      center: scalePoint(antipad.center, scale),
+      diameter: antipad.diameter * scale,
+    })),
     unassignedVertices: geometry.unassignedVertices.map((point) =>
       scalePoint(point, scale),
     ),

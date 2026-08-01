@@ -570,6 +570,8 @@ export const extractBinaryBoardGeometry = (
       placements,
       pads: [],
       holes: [],
+      thermalReliefs: [],
+      antipads: [],
       unassignedVertices: vertices,
       unverifiedConnections,
       unverifiedViaLocations,

@@ -43,6 +43,8 @@ export interface PadsFixtureExpectedResults {
     texts: number
     outlines: number
     pours: number
+    thermalReliefs: number
+    antipads: number
   }
   diagnosticCount: number
   diagnosticCodes: Record<string, number>
@@ -82,6 +84,8 @@ export const expectedResultsByAssetId: Record<
       texts: 0,
       outlines: 1,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 1,
     diagnosticCodes: {
@@ -118,6 +122,8 @@ export const expectedResultsByAssetId: Record<
       texts: 0,
       outlines: 1,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 0,
     diagnosticCodes: {},
@@ -125,6 +131,42 @@ export const expectedResultsByAssetId: Record<
       sourceRecords: 56,
       partiallyDecodedRecords: 0,
       skippedRecords: 50,
+      binaryBytes: 0,
+      partiallyDecodedBytes: 0,
+      opaqueBytes: 0,
+    },
+  },
+  "kicad-claysight-ascii": {
+    units: "BASIC",
+    layerCount: 2,
+    bounds: [5_080_000, 38_100_000, 106_680_000, 142_240_000],
+    representative: {
+      kind: "placement",
+      reference: "U1",
+      x: 46_989_898.666666664,
+      y: 87_629_822,
+    },
+    counts: {
+      components: 36,
+      pads: 140,
+      holes: 140,
+      nets: 32,
+      traces: 245,
+      vias: 0,
+      texts: 25,
+      outlines: 1,
+      pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
+    },
+    diagnosticCount: 1,
+    diagnosticCodes: {
+      "geometry-unrouted-ascii-connections-omitted-from-fabrication-geometry": 1,
+    },
+    coverage: {
+      sourceRecords: 3_612,
+      partiallyDecodedRecords: 0,
+      skippedRecords: 3_212,
       binaryBytes: 0,
       partiallyDecodedBytes: 0,
       opaqueBytes: 0,
@@ -152,6 +194,8 @@ export const expectedResultsByAssetId: Record<
       texts: 0,
       outlines: 0,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 1,
     diagnosticCodes: {
@@ -186,16 +230,18 @@ export const expectedResultsByAssetId: Record<
       nets: 14,
       traces: 229,
       vias: 24,
-      texts: 17,
+      texts: 75,
       outlines: 1,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 0,
     diagnosticCodes: {},
     coverage: {
       sourceRecords: 7_442,
       partiallyDecodedRecords: 0,
-      skippedRecords: 7_126,
+      skippedRecords: 7_068,
       binaryBytes: 0,
       partiallyDecodedBytes: 0,
       opaqueBytes: 0,
@@ -218,9 +264,11 @@ export const expectedResultsByAssetId: Record<
       nets: 221,
       traces: 2_850,
       vias: 796,
-      texts: 28,
+      texts: 518,
       outlines: 1,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 1,
     diagnosticCodes: {
@@ -229,7 +277,7 @@ export const expectedResultsByAssetId: Record<
     coverage: {
       sourceRecords: 33_316,
       partiallyDecodedRecords: 0,
-      skippedRecords: 29_760,
+      skippedRecords: 29_270,
       binaryBytes: 0,
       partiallyDecodedBytes: 0,
       opaqueBytes: 0,
@@ -254,6 +302,8 @@ export const expectedResultsByAssetId: Record<
       texts: 0,
       outlines: 0,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 41,
     diagnosticCodes: {
@@ -289,9 +339,11 @@ export const expectedResultsByAssetId: Record<
       nets: 281,
       traces: 5_896,
       vias: 1_074,
-      texts: 33,
+      texts: 760,
       outlines: 1,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 1,
     diagnosticCodes: {
@@ -300,7 +352,7 @@ export const expectedResultsByAssetId: Record<
     coverage: {
       sourceRecords: 34_667,
       partiallyDecodedRecords: 0,
-      skippedRecords: 27_705,
+      skippedRecords: 26_978,
       binaryBytes: 0,
       partiallyDecodedBytes: 0,
       opaqueBytes: 0,
@@ -326,6 +378,8 @@ export const expectedResultsByAssetId: Record<
       texts: 0,
       outlines: 0,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 41,
     diagnosticCodes: {
@@ -363,6 +417,8 @@ export const expectedResultsByAssetId: Record<
       texts: 0,
       outlines: 0,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 39,
     diagnosticCodes: {
@@ -399,9 +455,11 @@ export const expectedResultsByAssetId: Record<
       nets: 0,
       traces: 0,
       vias: 0,
-      texts: 3,
+      texts: 785,
       outlines: 1,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 1,
     diagnosticCodes: {
@@ -410,7 +468,7 @@ export const expectedResultsByAssetId: Record<
     coverage: {
       sourceRecords: 23_321,
       partiallyDecodedRecords: 0,
-      skippedRecords: 22_347,
+      skippedRecords: 21_570,
       binaryBytes: 0,
       partiallyDecodedBytes: 0,
       opaqueBytes: 0,
@@ -436,6 +494,8 @@ export const expectedResultsByAssetId: Record<
       texts: 0,
       outlines: 0,
       pours: 0,
+      thermalReliefs: 0,
+      antipads: 0,
     },
     diagnosticCount: 36,
     diagnosticCodes: {

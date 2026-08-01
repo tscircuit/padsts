@@ -67,9 +67,10 @@ const readLineSpans = (sourceText: string): LineSpan[] => {
 const parseVersionHeader = (
   sectionName: string,
 ): { version: string; units: PadsAsciiUnits } | undefined => {
-  const match = /^PADS-POWERPCB-(.+)-(BASIC|MILS|INCHES|METRIC)$/u.exec(
-    sectionName,
-  )
+  const match =
+    /^PADS-POWERPCB-(.+)-(BASIC|MILS|INCHES|METRIC)(?:-[^!]+)?$/u.exec(
+      sectionName,
+    )
   if (!match) return undefined
 
   return {

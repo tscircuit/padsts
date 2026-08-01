@@ -59,12 +59,49 @@ export interface PadsGeometryPath {
   groupId?: string
 }
 
-export type PadsGeometryCircleKind = "via" | "copper" | "keepout" | "drawing"
+export type PadsGeometryCircleKind =
+  | "outline"
+  | "via"
+  | "copper"
+  | "keepout"
+  | "drawing"
 
 export interface PadsGeometryViaPad {
   layer: number
   radius: number
   shape: "circle" | "square"
+}
+
+export interface PadsGeometryThermalRelief {
+  id?: string
+  source?: PadsSourceProvenance
+  center: PadsGeometryPoint
+  layer: number
+  shape: "circle" | "square"
+  rotation: number
+  innerDiameter: number
+  outerDiameter: number
+  spokeWidth: number
+  spokeCount: number
+  reference?: string
+  pinNumber?: string
+  decalName?: string
+  viaName?: string
+  netName?: string
+}
+
+export interface PadsGeometryAntipad {
+  id?: string
+  source?: PadsSourceProvenance
+  center: PadsGeometryPoint
+  layer: number
+  shape: "circle" | "square"
+  diameter: number
+  reference?: string
+  pinNumber?: string
+  decalName?: string
+  viaName?: string
+  netName?: string
 }
 
 export interface PadsGeometryCircle {
@@ -101,13 +138,20 @@ export interface PadsGeometryText {
   strokeWidth: number
   rotation: number
   mirrored: boolean
+  horizontalAlignment?: "left" | "center" | "right"
+  verticalAlignment?: "top" | "center" | "bottom"
+  reference?: string
+  role?: "reference" | "value"
   layer?: number | string
+  gerberLayer?: string
 }
 
 export interface PadsGeometryPlacement {
   id?: string
   source?: PadsSourceProvenance
   reference: string
+  /** PADS PART `PTYPENM`, distinct from the selected part decal. */
+  partTypeName?: string
   footprintName?: string
   location: PadsGeometryPoint
   rotation: number
@@ -128,6 +172,7 @@ export interface PadsGeometryPad {
   reference: string
   pinNumber: string
   decalName: string
+  netName?: string
 }
 
 export interface PadsGeometryHole {
@@ -143,6 +188,7 @@ export interface PadsGeometryHole {
   reference: string
   pinNumber: string
   decalName: string
+  netName?: string
 }
 
 export interface PadsGeometryLayerInfo {
@@ -190,6 +236,8 @@ export interface PadsBoardGeometry {
   placements: PadsGeometryPlacement[]
   pads: PadsGeometryPad[]
   holes: PadsGeometryHole[]
+  thermalReliefs: PadsGeometryThermalRelief[]
+  antipads: PadsGeometryAntipad[]
   unassignedVertices: PadsGeometryPoint[]
   unverifiedConnections: PadsGeometryPath[]
   unverifiedViaLocations: PadsGeometryPoint[]

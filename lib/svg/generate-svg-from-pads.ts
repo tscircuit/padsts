@@ -41,6 +41,8 @@ export interface GeneratePadsSvgOptions {
   drillColor?: string
   gerberLayerColors?: Partial<Record<string, string>>
   visibleGerberLayers?: string[]
+  /** Render only component-owned text belonging to these references. */
+  visibleTextReferences?: string[]
   showBinarySectionSummary?: boolean
   showUnverifiedConnections?: boolean
   showUnassignedVertices?: boolean
@@ -70,6 +72,7 @@ interface RenderContext {
   drillColor: string
   layerColors: Record<string, string>
   visibleGerberLayers?: Set<string>
+  visibleTextReferences?: Set<string>
 }
 
 interface ViaAperture {
@@ -543,7 +546,21 @@ const getCopperMaskAttribute = (
             layer: circle.layer,
           })) === layerName
       )
-    })
+    }) ||
+    context.geometry.antipads.some(
+      (antipad) =>
+        getGerberCopperLayerName({
+          geometry: context.geometry,
+          layer: antipad.layer,
+        }) === layerName,
+    ) ||
+    context.geometry.thermalReliefs.some(
+      (thermal) =>
+        getGerberCopperLayerName({
+          geometry: context.geometry,
+          layer: thermal.layer,
+        }) === layerName,
+    )
   return hasNegativeGeometry
     ? ` mask="url(#${getCopperMaskId(layerName)})"`
     : ""
@@ -726,6 +743,8 @@ const renderApertureDefinitions = (apertures: ViaAperture[]): string =>
 const renderCopperPolarityMasks = (context: RenderContext): string => {
   const negativePathsByLayer = new Map<string, PadsGeometryPath[]>()
   const negativeCirclesByLayer = new Map<string, PadsGeometryCircle[]>()
+  const antipadsByLayer = new Map<string, PadsBoardGeometry["antipads"]>()
+  const thermalsByLayer = new Map<string, PadsBoardGeometry["thermalReliefs"]>()
   for (const path of context.geometry.paths) {
     if (path.kind !== "copper" || path.polarity !== "negative") continue
     const layerName =
@@ -750,15 +769,36 @@ const renderCopperPolarityMasks = (context: RenderContext): string => {
     circles.push(circle)
     negativeCirclesByLayer.set(layerName, circles)
   }
+  for (const antipad of context.geometry.antipads) {
+    const layerName = getGerberCopperLayerName({
+      geometry: context.geometry,
+      layer: antipad.layer,
+    })
+    const antipads = antipadsByLayer.get(layerName) ?? []
+    antipads.push(antipad)
+    antipadsByLayer.set(layerName, antipads)
+  }
+  for (const thermal of context.geometry.thermalReliefs) {
+    const layerName = getGerberCopperLayerName({
+      geometry: context.geometry,
+      layer: thermal.layer,
+    })
+    const thermals = thermalsByLayer.get(layerName) ?? []
+    thermals.push(thermal)
+    thermalsByLayer.set(layerName, thermals)
+  }
 
   const layerNames = new Set([
     ...negativePathsByLayer.keys(),
     ...negativeCirclesByLayer.keys(),
+    ...antipadsByLayer.keys(),
+    ...thermalsByLayer.keys(),
   ])
   const width = context.bounds.maximumX - context.bounds.minimumX
   const height = context.bounds.maximumY - context.bounds.minimumY
   return [...layerNames]
     .map((layerName) => {
+      if (!shouldRenderLayer(context, layerName)) return ""
       const pathElements = (negativePathsByLayer.get(layerName) ?? [])
         .map((path) => {
           const pathData = getPathData(path)
@@ -777,7 +817,73 @@ const renderCopperPolarityMasks = (context: RenderContext): string => {
             `<circle ${getMetadataAttributes(circle)} cx="${formatNumber(circle.center.x)}" cy="${formatNumber(circle.center.y)}" r="${formatNumber(Math.abs(circle.radius))}" fill="black" stroke="black" stroke-width="${formatNumber(Math.max(Math.abs(circle.width), context.minimumFeatureSize))}"/>`,
         )
         .join("")
-      return `<mask id="${getCopperMaskId(layerName)}" maskUnits="userSpaceOnUse" x="${formatNumber(context.bounds.minimumX)}" y="${formatNumber(context.bounds.minimumY)}" width="${formatNumber(width)}" height="${formatNumber(height)}"><rect x="${formatNumber(context.bounds.minimumX)}" y="${formatNumber(context.bounds.minimumY)}" width="${formatNumber(width)}" height="${formatNumber(height)}" fill="white"/>${pathElements}${circleElements}</mask>`
+      const antipadElements = (antipadsByLayer.get(layerName) ?? [])
+        .map((antipad) => {
+          const identityAttributes = `${antipad.id ? ` id="${escapeXml(getSvgEntityId(antipad.id))}"` : ""}${antipad.source ? ` data-source-id="${escapeXml(antipad.source.sourceId)}"` : ""} data-kind="antipad" data-layer="${formatNumber(antipad.layer)}"`
+          return antipad.shape === "square"
+            ? `<rect${identityAttributes} x="${formatNumber(antipad.center.x - antipad.diameter / 2)}" y="${formatNumber(antipad.center.y - antipad.diameter / 2)}" width="${formatNumber(antipad.diameter)}" height="${formatNumber(antipad.diameter)}" fill="black"/>`
+            : `<circle${identityAttributes} cx="${formatNumber(antipad.center.x)}" cy="${formatNumber(antipad.center.y)}" r="${formatNumber(antipad.diameter / 2)}" fill="black"/>`
+        })
+        .join("")
+      const thermalClearanceElements = (thermalsByLayer.get(layerName) ?? [])
+        .map((thermal) => {
+          const identityAttributes = `${thermal.source ? ` data-source-id="${escapeXml(thermal.source.sourceId)}"` : ""} data-kind="thermal-clearance" data-layer="${formatNumber(thermal.layer)}" data-shape="${thermal.shape}"`
+          return thermal.shape === "square"
+            ? `<rect${identityAttributes} x="${formatNumber(thermal.center.x - thermal.outerDiameter / 2)}" y="${formatNumber(thermal.center.y - thermal.outerDiameter / 2)}" width="${formatNumber(thermal.outerDiameter)}" height="${formatNumber(thermal.outerDiameter)}" fill="black"/>`
+            : `<circle${identityAttributes} cx="${formatNumber(thermal.center.x)}" cy="${formatNumber(thermal.center.y)}" r="${formatNumber(thermal.outerDiameter / 2)}" fill="black"/>`
+        })
+        .join("")
+      return `<mask id="${getCopperMaskId(layerName)}" maskUnits="userSpaceOnUse" x="${formatNumber(context.bounds.minimumX)}" y="${formatNumber(context.bounds.minimumY)}" width="${formatNumber(width)}" height="${formatNumber(height)}"><rect x="${formatNumber(context.bounds.minimumX)}" y="${formatNumber(context.bounds.minimumY)}" width="${formatNumber(width)}" height="${formatNumber(height)}" fill="white"/>${pathElements}${circleElements}${antipadElements}${thermalClearanceElements}</mask>`
+    })
+    .join("")
+}
+
+const renderThermalReliefs = (context: RenderContext): string => {
+  const thermalsByLayer = new Map<string, PadsBoardGeometry["thermalReliefs"]>()
+  for (const thermal of context.geometry.thermalReliefs) {
+    if (
+      !isFinitePoint(thermal.center) ||
+      thermal.innerDiameter <= 0 ||
+      thermal.outerDiameter <= thermal.innerDiameter ||
+      thermal.spokeWidth <= 0 ||
+      thermal.spokeCount < 1
+    ) {
+      continue
+    }
+    const layerName = getGerberCopperLayerName({
+      geometry: context.geometry,
+      layer: thermal.layer,
+    })
+    const thermals = thermalsByLayer.get(layerName) ?? []
+    thermals.push(thermal)
+    thermalsByLayer.set(layerName, thermals)
+  }
+
+  return [...thermalsByLayer.entries()]
+    .map(([layerName, thermals]) => {
+      if (!shouldRenderLayer(context, layerName)) return ""
+      const color = getLayerColor({
+        layerName,
+        layerColors: context.layerColors,
+      })
+      const elements = thermals
+        .map((thermal) => {
+          const innerRadius = thermal.innerDiameter / 2
+          const spokeLength =
+            (thermal.outerDiameter - thermal.innerDiameter) / 2
+          const identityAttributes = `${thermal.id ? ` id="${escapeXml(getSvgEntityId(thermal.id))}"` : ""}${thermal.source ? ` data-source-id="${escapeXml(thermal.source.sourceId)}"` : ""} data-kind="thermal-relief" data-layer="${formatNumber(thermal.layer)}" data-shape="${thermal.shape}" data-spoke-count="${formatNumber(thermal.spokeCount)}"`
+          const spokes = Array.from(
+            { length: thermal.spokeCount },
+            (_, spokeIndex) => {
+              const rotation =
+                thermal.rotation + (spokeIndex * 360) / thermal.spokeCount
+              return `<rect x="${formatNumber(innerRadius)}" y="${formatNumber(-thermal.spokeWidth / 2)}" width="${formatNumber(spokeLength)}" height="${formatNumber(thermal.spokeWidth)}" transform="translate(${formatNumber(thermal.center.x)} ${formatNumber(thermal.center.y)}) rotate(${formatNumber(rotation)})"/>`
+            },
+          ).join("")
+          return `<g${identityAttributes}>${spokes}</g>`
+        })
+        .join("")
+      return `<g id="pads-${escapeXml(layerName)}-thermal-reliefs" data-gerber-layer="${escapeXml(layerName)}" color="${color}" fill="currentColor" stroke="none"${context.artworkClipAttribute}>${elements}</g>`
     })
     .join("")
 }
@@ -953,7 +1059,7 @@ const renderCopperCircles = ({
         })
         .join("")
 
-      return `<g id="pads-${layerName}-flashes" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${getCopperMaskAttribute(context, layerName)}${context.artworkClipAttribute}>${circleElements}</g>`
+      return `<g id="pads-${layerName}-flashes" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="currentColor"${context.artworkClipAttribute}>${circleElements}</g>`
     })
     .join("")
 }
@@ -1040,7 +1146,7 @@ const renderFootprintPads = (context: RenderContext): string => {
           return `<rect ${attributes}${(pad.cornerRadius ?? 0) > 0 ? ` data-corner-radius="${formatNumber(pad.cornerRadius ?? 0)}"` : ""} x="${formatNumber(-pad.width / 2)}" y="${formatNumber(-pad.height / 2)}" width="${formatNumber(pad.width)}" height="${formatNumber(pad.height)}"${cornerRadius > 0 ? ` rx="${formatNumber(cornerRadius)}" ry="${formatNumber(cornerRadius)}"` : ""} transform="translate(${formatNumber(pad.center.x)} ${formatNumber(pad.center.y)}) rotate(${formatNumber(pad.rotation)})"/>`
         })
         .join("")
-      return `<g id="pads-${layerName}-component-pads" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="none"${getCopperMaskAttribute(context, layerName)}${context.artworkClipAttribute}>${padElements}</g>`
+      return `<g id="pads-${layerName}-component-pads" data-gerber-layer="${layerName}" color="${color}" fill="currentColor" stroke="none"${context.artworkClipAttribute}>${padElements}</g>`
     })
     .join("")
 }
@@ -1294,35 +1400,83 @@ const renderPlacements = (context: RenderContext): string => {
 }
 
 const renderTexts = (context: RenderContext): string => {
-  if (!shouldRenderLayer(context, "F_Silkscreen")) return ""
-  const textElements = context.geometry.texts
-    .slice(0, 2000)
-    .map((text) => {
-      if (!isFinitePoint(text.location)) return ""
-      const fontSize = Math.max(
-        Math.abs(text.height),
-        context.minimumFeatureSize * 5,
-      )
-      const strokeWidth = Math.max(
-        Math.abs(text.strokeWidth),
-        context.minimumFeatureSize * 0.5,
-      )
-      const mirrorScale = text.mirrored ? -1 : 1
-      return `<text${text.id ? ` id="${escapeXml(getSvgEntityId(text.id))}"` : ""}${text.source ? ` data-source-id="${escapeXml(text.source.sourceId)}"` : ""} data-kind="board-text" data-pads-layer="${escapeXml(String(text.layer ?? ""))}" x="0" y="0" transform="translate(${formatNumber(text.location.x)} ${formatNumber(text.location.y)}) rotate(${formatNumber(text.rotation)}) scale(${mirrorScale},-1)" fill="currentColor" stroke="currentColor" stroke-width="${formatNumber(strokeWidth * 0.15)}" font-family="monospace" font-size="${formatNumber(fontSize)}">${escapeXml(text.content)}</text>`
+  const textsByLayer = new Map<string, PadsBoardGeometry["texts"]>()
+  for (const text of context.geometry.texts.slice(0, 2000)) {
+    if (
+      context.visibleTextReferences &&
+      (!text.reference || !context.visibleTextReferences.has(text.reference))
+    ) {
+      continue
+    }
+    const layerName =
+      text.gerberLayer ??
+      getGerberCopperLayerName({
+        geometry: context.geometry,
+        layer: text.layer,
+      })
+    const layerTexts = textsByLayer.get(layerName) ?? []
+    layerTexts.push(text)
+    textsByLayer.set(layerName, layerTexts)
+  }
+
+  return [...textsByLayer.entries()]
+    .map(([layerName, texts]) => {
+      if (!shouldRenderLayer(context, layerName)) return ""
+      const textElements = texts
+        .map((text) => {
+          if (!isFinitePoint(text.location)) return ""
+          const fontSize = Math.max(
+            Math.abs(text.height),
+            context.minimumFeatureSize * 5,
+          )
+          const strokeWidth = Math.max(
+            Math.abs(text.strokeWidth),
+            context.minimumFeatureSize * 0.5,
+          )
+          const mirrorScale = text.mirrored ? -1 : 1
+          const textAnchor =
+            text.horizontalAlignment === "left"
+              ? "start"
+              : text.horizontalAlignment === "right"
+                ? "end"
+                : "middle"
+          const dominantBaseline =
+            text.verticalAlignment === "top"
+              ? "text-before-edge"
+              : text.verticalAlignment === "bottom"
+                ? "text-after-edge"
+                : "central"
+          return `<text${text.id ? ` id="${escapeXml(getSvgEntityId(text.id))}"` : ""}${text.source ? ` data-source-id="${escapeXml(text.source.sourceId)}"` : ""} data-kind="board-text" data-pads-layer="${escapeXml(String(text.layer ?? ""))}" data-gerber-layer-name="${escapeXml(layerName)}"${text.reference ? ` data-reference="${escapeXml(text.reference)}"` : ""}${text.role ? ` data-role="${escapeXml(text.role)}"` : ""} x="0" y="0" text-anchor="${textAnchor}" dominant-baseline="${dominantBaseline}" transform="translate(${formatNumber(text.location.x)} ${formatNumber(text.location.y)}) rotate(${formatNumber(text.rotation)}) scale(${mirrorScale},-1)" fill="currentColor" stroke="currentColor" stroke-width="${formatNumber(strokeWidth * 0.15)}" font-family="monospace" font-size="${formatNumber(fontSize)}">${escapeXml(text.content)}</text>`
+        })
+        .join("")
+
+      if (!textElements) return ""
+      const color = getLayerColor({
+        layerName,
+        layerColors: context.layerColors,
+      })
+      return `<g id="pads-${escapeXml(layerName)}-text" data-gerber-layer="${escapeXml(layerName)}" color="${color}" fill="currentColor" stroke="currentColor"${context.artworkClipAttribute}>${textElements}</g>`
     })
     .join("")
+}
 
-  if (!textElements) return ""
-  const color = getLayerColor({
-    layerName: "F_Silkscreen",
-    layerColors: context.layerColors,
-  })
-  return `<g id="pads-F_Silkscreen-text" data-gerber-layer="F_Silkscreen" color="${color}" fill="currentColor" stroke="currentColor"${context.artworkClipAttribute}>${textElements}</g>`
+const getCirclePathData = (circle: PadsGeometryCircle): string => {
+  const radius = Math.abs(circle.radius)
+  if (
+    !isFinitePoint(circle.center) ||
+    !Number.isFinite(radius) ||
+    radius <= 0
+  ) {
+    return ""
+  }
+  const left = circle.center.x - radius
+  const right = circle.center.x + radius
+  return `M ${formatNumber(left)} ${formatNumber(circle.center.y)} A ${formatNumber(radius)} ${formatNumber(radius)} 0 1 0 ${formatNumber(right)} ${formatNumber(circle.center.y)} A ${formatNumber(radius)} ${formatNumber(radius)} 0 1 0 ${formatNumber(left)} ${formatNumber(circle.center.y)} Z`
 }
 
 const renderOutline = (context: RenderContext): string => {
   if (!shouldRenderLayer(context, "Edge_Cuts")) return ""
-  const outlineElements = context.geometry.paths
+  const outlinePathElements = context.geometry.paths
     .filter((path) => path.kind === "outline")
     .map((path) => {
       const pathData = getPathData(path)
@@ -1335,6 +1489,19 @@ const renderOutline = (context: RenderContext): string => {
       return `<path ${getMetadataAttributes(path)} d="${pathData}" fill="none" stroke="currentColor" stroke-width="${formatNumber(strokeWidth)}"/>`
     })
     .join("")
+  const outlineCircleElements = context.geometry.circles
+    .filter((circle) => circle.kind === "outline")
+    .map((circle) => {
+      const radius = Math.abs(circle.radius)
+      if (!Number.isFinite(radius) || radius <= 0) return ""
+      const strokeWidth = Math.max(
+        Math.abs(circle.width),
+        context.minimumFeatureSize,
+      )
+      return `<circle ${getMetadataAttributes(circle)} cx="${formatNumber(circle.center.x)}" cy="${formatNumber(circle.center.y)}" r="${formatNumber(radius)}" fill="none" stroke="currentColor" stroke-width="${formatNumber(strokeWidth)}"/>`
+    })
+    .join("")
+  const outlineElements = outlinePathElements + outlineCircleElements
 
   if (!outlineElements) return ""
   const color = getLayerColor({
@@ -1475,8 +1642,18 @@ export const generateSvgFromPadsGeometry = (
   const outlinePaths = geometry.paths.filter(
     (path) => path.kind === "outline" && path.points.length >= 3,
   )
-  const outlineClipAttribute =
-    outlinePaths.length > 0 ? ' clip-path="url(#pads-board-outline)"' : ""
+  const outlineCircles = geometry.circles.filter(
+    (circle) => circle.kind === "outline" && circle.radius > 0,
+  )
+  const outlineClipData = [
+    ...outlinePaths.map((path) => getPathData({ ...path, closed: true })),
+    ...outlineCircles.map(getCirclePathData),
+  ]
+    .filter(Boolean)
+    .join(" ")
+  const outlineClipAttribute = outlineClipData
+    ? ' clip-path="url(#pads-board-outline)"'
+    : ""
   const artworkClipAttribute =
     options.clipArtworkToBoardOutline === false ? "" : outlineClipAttribute
   const { apertures, apertureByKey } = getViaApertures(
@@ -1493,13 +1670,10 @@ export const generateSvgFromPadsGeometry = (
     visibleGerberLayers: options.visibleGerberLayers
       ? new Set(options.visibleGerberLayers)
       : undefined,
+    visibleTextReferences: options.visibleTextReferences
+      ? new Set(options.visibleTextReferences)
+      : undefined,
   }
-  const outlineClipPaths = outlinePaths
-    .map((path) => {
-      const pathData = getPathData({ ...path, closed: true })
-      return pathData ? `<path d="${pathData}"/>` : ""
-    })
-    .join("")
   const metadata = {
     sourceFormat: geometry.sourceFormat,
     version: geometry.version,
@@ -1510,6 +1684,7 @@ export const generateSvgFromPadsGeometry = (
     issues: geometry.issues,
     coverage: geometry.coverage,
     visibleGerberLayers: options.visibleGerberLayers,
+    visibleTextReferences: options.visibleTextReferences,
     boardViewBox: options.viewBox,
     boardViewBoxUnits: options.viewBox ? boardViewBoxUnits : undefined,
     normalizedBoardViewBox,
@@ -1519,6 +1694,8 @@ export const generateSvgFromPadsGeometry = (
       circles: geometry.circles.length,
       pads: geometry.pads.length,
       holes: geometry.holes.length,
+      thermalReliefs: geometry.thermalReliefs.length,
+      antipads: geometry.antipads.length,
       placements: geometry.placements.length,
       texts: geometry.texts.length,
       unassignedVertices: geometry.unassignedVertices.length,
@@ -1537,8 +1714,8 @@ export const generateSvgFromPadsGeometry = (
     `<title>PADS ${escapeXml(geometry.version)} Gerber-style board visualization</title>`,
     `<metadata>${escapeXml(JSON.stringify(metadata))}</metadata>`,
     "<defs>",
-    outlineClipPaths
-      ? `<clipPath id="pads-board-outline">${outlineClipPaths}</clipPath>`
+    outlineClipData
+      ? `<clipPath id="pads-board-outline"><path d="${outlineClipData}" fill-rule="evenodd" clip-rule="evenodd"/></clipPath>`
       : "",
     renderCopperPolarityMasks(context),
     renderApertureDefinitions(apertures),
@@ -1549,6 +1726,7 @@ export const generateSvgFromPadsGeometry = (
     renderCopperPaths(context),
     renderCopperCircles({ context, apertureByKey }),
     renderFootprintPads(context),
+    renderThermalReliefs(context),
     renderDrills({ context }),
     renderDrawingGeometry(context),
     renderKeepouts(context),

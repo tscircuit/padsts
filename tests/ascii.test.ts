@@ -101,6 +101,54 @@ describe("PADS ASCII", () => {
     expect(document.getString()).toBe(sourceText)
   })
 
+  test("parses BASIC headers with a database-capacity suffix", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V10.0-BASIC-250L! DESIGN DATABASE ASCII FILE 1.0",
+      "*PCB*",
+      "UNITS 0",
+      "*END*",
+      "",
+    ].join("\n")
+    const document = parsePadsAscii(sourceText)
+
+    expect(document.version).toBe("V10.0")
+    expect(document.units).toBe("BASIC")
+    expect(document.getString()).toBe(sourceText)
+  })
+
+  test("normalizes BRDCIR board pieces as circular outlines", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V10.0-BASIC-250L! DESIGN DATABASE ASCII FILE 1.0",
+      "*PCB*",
+      "MAXIMUMLAYER 2",
+      "*LINES*",
+      "BOARD_OUTLINE BOARD 0 0 2 0",
+      "CLOSED 5 10 0 0",
+      "0 0",
+      "15000000 0",
+      "15000000 10000000",
+      "0 10000000",
+      "0 0",
+      "BRDCIR 2 10 0 0",
+      "9000000 5000000",
+      "6000000 5000000",
+      "*END*",
+      "",
+    ].join("\n")
+    const geometry = extractPadsBoardGeometry(parsePadsAscii(sourceText))
+
+    expect(
+      geometry.paths.filter(({ kind }) => kind === "outline"),
+    ).toHaveLength(1)
+    expect(geometry.circles.filter(({ kind }) => kind === "outline")).toEqual([
+      expect.objectContaining({
+        center: { x: basic(7_500_000), y: basic(5_000_000) },
+        radius: basic(1_500_000),
+        sourcePieceKind: "BRDCIR",
+      }),
+    ])
+  })
+
   test("keeps nested route markers inside their top-level section", () => {
     const sourceText = [
       "!PADS-POWERPCB-V9.5-MILS! DESIGN DATABASE ASCII FILE 1.0",
@@ -139,6 +187,39 @@ describe("PADS ASCII", () => {
       "nested-header": 1,
       data: 1,
     })
+    expect(document.getString()).toBe(sourceText)
+  })
+
+  test("tokenizes escaped quoted fields, empty fields, and comments losslessly", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-MILS! DESIGN DATABASE ASCII FILE 1.0",
+      "*TEXT*",
+      "# hash comment",
+      "; semicolon comment",
+      "// slash comment",
+      String.raw`"quoted \"name\"" "" "path\\to\\file"`,
+      "*END*",
+      "",
+    ].join("\n")
+    const document = parsePadsAscii(sourceText)
+    const textSection = document.getSection("TEXT")
+
+    expect(textSection?.records.map((record) => record.kind)).toEqual([
+      "comment",
+      "comment",
+      "comment",
+      "data",
+    ])
+    expect(textSection?.records[3]?.tokens.map(({ value }) => value)).toEqual([
+      'quoted "name"',
+      "",
+      "path\\to\\file",
+    ])
+    expect(textSection?.records[3]?.tokens).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ quoted: true, rawText: '""' }),
+      ]),
+    )
     expect(document.getString()).toBe(sourceText)
   })
 
@@ -342,6 +423,9 @@ describe("PADS ASCII", () => {
     const firstInnerCopperSvg = generateSvgFromPads(document, {
       visibleGerberLayers: ["In1_Cu"],
     })
+    const secondInnerCopperSvg = generateSvgFromPads(document, {
+      visibleGerberLayers: ["In2_Cu"],
+    })
 
     expect(geometry.circles).toHaveLength(3)
     expect(geometry.circles[0]).toMatchObject({
@@ -353,6 +437,7 @@ describe("PADS ASCII", () => {
       copperPads: [
         { layer: 1, radius: mils(20), shape: "circle" },
         { layer: 2, radius: mils(35), shape: "square" },
+        { layer: 3, radius: mils(30), shape: "circle" },
         { layer: 4, radius: mils(25), shape: "circle" },
       ],
       startLayer: 1,
@@ -364,13 +449,16 @@ describe("PADS ASCII", () => {
     expect(geometry.circles[1]).toMatchObject({
       kind: "via",
       center: { x: mils(100), y: mils(100) },
-      radius: mils(15),
+      radius: mils(20),
       drillRadius: mils(5),
       shape: "square",
-      copperPads: [{ layer: 2, radius: mils(15), shape: "square" }],
+      copperPads: [
+        { layer: 2, radius: mils(15), shape: "square" },
+        { layer: 3, radius: mils(20), shape: "circle" },
+      ],
       startLayer: 2,
       endLayer: 3,
-      width: mils(10),
+      width: mils(15),
       name: "SQUAREVIA",
       netName: "SQUARE_NET",
     })
@@ -380,12 +468,42 @@ describe("PADS ASCII", () => {
     expect(geometry.diagnostics).toContain(
       "1 ASCII via instances reference missing pad-stack definitions (MISSINGVIA)",
     )
-    expect(geometry.diagnostics).toContain(
-      "1 ASCII via layer pads use unsupported conductive shapes (RT)",
+    expect(geometry.thermalReliefs).toMatchObject([
+      {
+        center: { x: mils(100), y: mils(100) },
+        layer: 3,
+        shape: "circle",
+        rotation: 45,
+        innerDiameter: mils(90),
+        outerDiameter: mils(120),
+        spokeWidth: mils(15),
+        spokeCount: 4,
+        viaName: "SQUAREVIA",
+        netName: "SQUARE_NET",
+      },
+    ])
+    expect(geometry.antipads).toMatchObject([
+      {
+        center: { x: mils(100), y: 0 },
+        layer: 3,
+        shape: "circle",
+        diameter: mils(80),
+        viaName: "ROUNDVIA",
+      },
+      {
+        center: { x: mils(200), y: mils(200) },
+        layer: 3,
+        shape: "circle",
+        diameter: mils(80),
+        viaName: "ROUNDVIA",
+      },
+    ])
+    expect(geometry.diagnostics).not.toContain(
+      expect.stringContaining("unsupported conductive shapes (RT)"),
     )
     expect(svg).toContain('<rect id="pads-via-aperture-')
-    expect(svg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(6)
-    expect(svg.match(/data-name="SQUAREVIA"/gu)).toHaveLength(1)
+    expect(svg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(8)
+    expect(svg.match(/data-name="SQUAREVIA"/gu)).toHaveLength(2)
     expect(svg).toContain(`cx="${mils(100)}" cy="0" r="${mils(10)}"/>`)
     expect(svg).toContain(
       `cx="${mils(100)}" cy="${mils(100)}" r="${mils(5)}"/>`,
@@ -398,6 +516,46 @@ describe("PADS ASCII", () => {
     expect(firstInnerCopperSvg.match(/data-pad-layer="2"/gu)).toHaveLength(3)
     expect(firstInnerCopperSvg.match(/data-name="ROUNDVIA"/gu)).toHaveLength(2)
     expect(firstInnerCopperSvg.match(/data-name="SQUAREVIA"/gu)).toHaveLength(1)
+    expect(secondInnerCopperSvg).toContain('data-kind="thermal-relief"')
+    expect(secondInnerCopperSvg).toContain('data-spoke-count="4"')
+  })
+
+  test("accepts dimension-first thermal fields from BASIC via exports", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-BASIC! DESIGN DATABASE ASCII FILE 1.0",
+      "*PCB*",
+      "MAXIMUMLAYER 4",
+      "*VIA*",
+      "EXPORT_STYLE 762000 5 1 4",
+      "-2 1524000 R",
+      "-1 1524000 R",
+      "0 1524000 R",
+      "3 1524000 R",
+      "3 1524000 RT 2286000 45 571500 4",
+      "*ROUTE*",
+      "*SIGNAL* GND",
+      "U1.1 U2.1",
+      "V 1000000 2000000 EXPORT_STYLE 1 4",
+      "*END*",
+      "",
+    ].join("\n")
+
+    const geometry = extractPadsBoardGeometry(parsePadsAscii(sourceText))
+
+    expect(geometry.thermalReliefs).toMatchObject([
+      {
+        center: { x: basic(1_000_000), y: basic(2_000_000) },
+        layer: 3,
+        shape: "circle",
+        rotation: 45,
+        innerDiameter: basic(1_524_000),
+        outerDiameter: basic(2_286_000),
+        spokeWidth: basic(571_500),
+        spokeCount: 4,
+        viaName: "EXPORT_STYLE",
+        netName: "GND",
+      },
+    ])
   })
 
   test("accepts numeric footprint names in part placements", () => {
@@ -413,10 +571,70 @@ describe("PADS ASCII", () => {
     expect(geometry.placements).toMatchObject([
       {
         reference: "C6",
+        partTypeName: "0402",
         footprintName: "0402",
         location: { x: basic(1250), y: basic(-2500) },
         rotation: 90,
         bottomLayer: false,
+      },
+    ])
+  })
+
+  test("decodes placed reference and part-type labels", () => {
+    const sourceText = [
+      "!PADS-POWERPCB-V9.5-MILS! DESIGN DATABASE ASCII FILE 1.0",
+      "*PCB*",
+      "MAXIMUMLAYER 2",
+      "*PART*",
+      "U1 TEST_TYPE 100 200 90 U N 0 -1 0 -1 2",
+      "VALUE 10 20 15 1 50 5 N LEFT DOWN",
+      "Regular <Romansim Stroke Font>",
+      "Ref.Des.",
+      "VALUE -30 40 0 1 40 4 M CENTER UP",
+      "Regular <Romansim Stroke Font>",
+      "Part Type",
+      "U2 TEST_TYPE 300 200 0 U M 0 -1 0 -1 1",
+      "VALUE 10 20 15 1 50 5 N RIGHT UP",
+      "Regular <Romansim Stroke Font>",
+      "Ref.Des.",
+      "*END*",
+      "",
+    ].join("\n")
+    const geometry = extractPadsBoardGeometry(parsePadsAscii(sourceText))
+
+    expect(geometry.texts).toMatchObject([
+      {
+        content: "U1",
+        location: { x: mils(80), y: mils(210) },
+        rotation: 105,
+        mirrored: false,
+        horizontalAlignment: "left",
+        verticalAlignment: "top",
+        reference: "U1",
+        role: "reference",
+        gerberLayer: "F_Silkscreen",
+      },
+      {
+        content: "TEST_TYPE",
+        location: { x: mils(60), y: mils(170) },
+        rotation: 90,
+        mirrored: true,
+        horizontalAlignment: "center",
+        verticalAlignment: "bottom",
+        reference: "U1",
+        role: "value",
+        gerberLayer: "F_Silkscreen",
+      },
+      {
+        content: "U2",
+        location: { x: mils(290), y: mils(220) },
+        rotation: 165,
+        mirrored: true,
+        horizontalAlignment: "right",
+        verticalAlignment: "bottom",
+        reference: "U2",
+        role: "reference",
+        gerberLayer: "B_Silkscreen",
       },
     ])
   })
@@ -449,6 +667,9 @@ describe("PADS ASCII", () => {
     expect(
       geometry.placements.map((placement) => placement.footprintName),
     ).toEqual(["TEST_DECAL", "TEST_DECAL"])
+    expect(
+      geometry.placements.map((placement) => placement.partTypeName),
+    ).toEqual(["TEST_TYPE", "TEST_TYPE"])
     expect(geometry.pads).toMatchObject([
       {
         center: { x: mils(100), y: mils(192) },

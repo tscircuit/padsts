@@ -78,14 +78,21 @@ global Y-axis flip, and named fabrication-layer groups such as `F_Cu`, `B_Cu`,
 `F_Silkscreen`, and `Edge_Cuts`. Copper layers use the same red/blue/internal
 layer palette as tscircuit's Gerber snapshots. Resolved ASCII vias preserve
 distinct top, inner, bottom, and specific-layer round or square pad apertures,
-including partial layer spans. Basic ASCII part-decal terminals and round,
-square, rectangular-finger, and oval-finger surface pads are resolved through
-part types and transformed onto top or bottom copper. Mounted-side round and
-slotted drills preserve plating, slot orientation and offset, and render in an
+including partial layer spans. Round/square `RT`/`ST` thermal definitions retain
+their outer clearance, inner pad size, spoke width/count, and orientation;
+`RA`/`SA` records retain their antipad dimensions. The renderer applies these
+as layer-scoped plane clearances before drawing the conductive pad flash and
+thermal spokes. Basic ASCII part-decal terminals and round, square,
+rectangular-finger, and oval-finger surface pads are resolved through part
+types and transformed onto top or bottom copper. Mounted-side round and slotted
+drills preserve plating, slot orientation and offset, and render in an
 Excellon-style `Drill` group independently of offset copper fingers. Rounded
 and chamfered square/rectangular pads are also preserved. Basic part-decal
 `OPEN`, `CLOSED`, and `CIRCLE` graphics, including exact circular arcs, are
-transformed through top and mirrored bottom placements. Layer names, types,
+transformed through top and mirrored bottom placements. Static part-decal text
+such as pin legends and polarity marks preserves content, layer, alignment,
+rotation, mirroring, height, stroke width, and component ownership through the
+same placement transform. Layer names, types,
 roles, and sides decoded from `LAYER` and nested `MISC` `LAYER DATA` records
 place these graphics on front/back silkscreen, fabrication, mask, paste,
 drill-drawing, or user-drawing groups without treating ordinary component
@@ -96,6 +103,10 @@ render as Gerber-style keepout artwork. Compound negative `COPCUT` and `COPCCO`
 geometry uses per-layer SVG polarity masks so clear regions subtract from
 positive copper on top and mirrored bottom placements. Experimental
 native-binary route and via candidates are withheld from fabrication layers.
+Placed ASCII `Ref.Des.` and `Part Type` labels preserve visibility, alignment,
+rotation, mirroring, and front/back silkscreen placement. Focused visual tests
+can set `visibleTextReferences: ["U1"]` together with a native-coordinate
+`viewBox` to isolate one component's labels.
 
 Parser diagnostics and decoded counts are retained in SVG metadata. Optional
 binary section and unresolved-vertex overlays can be enabled explicitly:

@@ -91,6 +91,22 @@ export const finalizePadsBoardGeometry = (
       hole.id ??
       getStableEntityId({ kind: "hole", index, source: hole.source }),
   }))
+  const thermalReliefs = geometry.thermalReliefs.map((thermal, index) => ({
+    ...thermal,
+    id:
+      thermal.id ??
+      getStableEntityId({
+        kind: "thermal-relief",
+        index,
+        source: thermal.source,
+      }),
+  }))
+  const antipads = geometry.antipads.map((antipad, index) => ({
+    ...antipad,
+    id:
+      antipad.id ??
+      getStableEntityId({ kind: "antipad", index, source: antipad.source }),
+  }))
   const unassignedVertices = geometry.unassignedVertices.map(
     (point, index) => ({
       ...point,
@@ -138,7 +154,9 @@ export const finalizePadsBoardGeometry = (
     texts.length +
     placements.length +
     pads.length +
-    holes.length
+    holes.length +
+    thermalReliefs.length +
+    antipads.length
   const entitiesWithProvenance = [
     ...paths,
     ...circles,
@@ -146,6 +164,8 @@ export const finalizePadsBoardGeometry = (
     ...placements,
     ...pads,
     ...holes,
+    ...thermalReliefs,
+    ...antipads,
   ].filter((entity) => entity.source !== undefined).length
 
   return {
@@ -156,6 +176,8 @@ export const finalizePadsBoardGeometry = (
     placements,
     pads,
     holes,
+    thermalReliefs,
+    antipads,
     unassignedVertices,
     unverifiedConnections,
     unverifiedViaLocations,

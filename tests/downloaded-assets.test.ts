@@ -118,6 +118,8 @@ describe("downloaded PADS fixtures", () => {
               outlines: geometry.paths.filter(({ kind }) => kind === "outline")
                 .length,
               pours: 0,
+              thermalReliefs: geometry.thermalReliefs.length,
+              antipads: geometry.antipads.length,
             },
             diagnosticCount: inspection.diagnostics.length,
             diagnosticCodes,

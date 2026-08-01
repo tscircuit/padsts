@@ -21,6 +21,8 @@ export interface PadsInspectionEntityCounts {
   placements: number
   pads: number
   holes: number
+  thermalReliefs: number
+  antipads: number
   unresolvedVertices: number
   unverifiedConnections: number
   unverifiedViaLocations: number
@@ -83,6 +85,8 @@ const getPoints = (geometry: PadsBoardGeometry): PadsGeometryPoint[] => [
   ...geometry.placements.map((placement) => placement.location),
   ...geometry.pads.map((pad) => pad.center),
   ...geometry.holes.map((hole) => hole.center),
+  ...geometry.thermalReliefs.map((thermal) => thermal.center),
+  ...geometry.antipads.map((antipad) => antipad.center),
 ]
 
 const getBounds = (
@@ -191,6 +195,8 @@ const getAsciiCoverage = (
       ...geometry.placements,
       ...geometry.pads,
       ...geometry.holes,
+      ...geometry.thermalReliefs,
+      ...geometry.antipads,
     ]
       .map((entity) => entity.source?.sourceId)
       .filter((sourceId): sourceId is string => sourceId !== undefined),
@@ -328,6 +334,8 @@ export const inspectPads = (
       placements: geometry.placements.length,
       pads: geometry.pads.length,
       holes: geometry.holes.length,
+      thermalReliefs: geometry.thermalReliefs.length,
+      antipads: geometry.antipads.length,
       unresolvedVertices: geometry.unassignedVertices.length,
       unverifiedConnections: geometry.unverifiedConnections.length,
       unverifiedViaLocations: geometry.unverifiedViaLocations.length,
